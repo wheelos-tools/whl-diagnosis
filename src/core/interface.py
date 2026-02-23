@@ -93,10 +93,9 @@ class IDiagnosticProbe(ABC):
         """单个探针的最大执行时间"""
         return 10.0
 
-    @abstractmethod
     def run_check(self) -> List[DiagResult]:
-        """执行诊断逻辑"""
-        ...
+        """执行诊断逻辑（子类可覆盖；也可直接覆盖 discovery/liveness/readiness）"""
+        return []
 
     def discovery(self) -> List[DiagResult]:
         """Discovery Phase: 发现设备/拓扑（无损、快速）"""

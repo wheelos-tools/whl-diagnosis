@@ -159,10 +159,9 @@ class DiagnosticEngine:
                 else:
                     results = await self._run_probe_safe(probe, method_name)
 
-                # 若结果未显式标注 phase，则补齐
+                # 若结果未显式标注非默认 phase，则用当前执行阶段补齐
                 for r in results:
-                    if not getattr(r, "phase", None):
-                        r.phase = phase
+                    r.phase = phase
 
                 probe_results.extend(results)
                 all_results.extend(results)

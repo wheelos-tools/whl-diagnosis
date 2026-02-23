@@ -24,6 +24,10 @@
   - 内存使用率
   - 磁盘剩余空间与 SMART 状态
   - PCIe 带宽协商检测 (x16 降级为 x8 等)
+  - 内核日志异常检测 (dmesg: panic / OOM / hardware errors)
+  - 系统日志服务失败检测 (journalctl)
+  - 启动耗时分析 (systemd-analyze)
+  - 崩溃转储检测 (kdump / vmcore)
 """
 
 import os
@@ -54,6 +58,10 @@ class SystemProbe(IDiagnosticProbe):
         results.extend(self._check_memory())
         results.extend(self._check_disk())
         results.extend(self._check_pcie())
+        results.extend(self._check_dmesg())
+        results.extend(self._check_journal())
+        results.extend(self._check_boot())
+        results.extend(self._check_kernel_crash())
         return results
 
     # ── CPU 检查 ──
@@ -402,6 +410,299 @@ class SystemProbe(IDiagnosticProbe):
                     status=Status.PASS,
                     severity=Severity.INFO,
                     message="No PCIe bandwidth degradation detected.",
+                )
+            )
+
+        return results
+
+    # ── dmesg 内核日志异常检测 ──
+
+    # Patterns that indicate critical kernel-level events
+    _DMESG_PATTERNS = [
+        (
+            re.compile(
+                r"(kernel panic|Oops:|BUG:|general protection fault|machine check exception)",
+                re.IGNORECASE,
+            ),
+            "Kernel Panic / BUG",
+            Status.FAIL,
+            Severity.CRITICAL,
+            "INFRA_KERNEL_PANIC",
+        ),
+        (
+            re.compile(r"Out of memory|oom.kill|oom_kill_process", re.IGNORECASE),
+            "OOM Kill",
+            Status.FAIL,
+            Severity.CRITICAL,
+            "INFRA_OOM_KILL",
+        ),
+        (
+            re.compile(
+                r"(hardware error|uncorrected error|DRAM ECC|DIMM|DRAM failure|MCE)",
+                re.IGNORECASE,
+            ),
+            "Hardware Error",
+            Status.FAIL,
+            Severity.CRITICAL,
+            "INFRA_HW_ERROR",
+        ),
+        (
+            re.compile(
+                r"(ACPI Error|firmware bug|BIOS.*error|UEFI.*error)", re.IGNORECASE
+            ),
+            "Firmware / ACPI Error",
+            Status.WARN,
+            Severity.MAJOR,
+            "INFRA_FIRMWARE_ERROR",
+        ),
+        (
+            re.compile(r"(I/O error|blk_update_request|buffer I/O error)", re.IGNORECASE),
+            "Disk I/O Error",
+            Status.WARN,
+            Severity.MAJOR,
+            "INFRA_DISK_IO_ERROR",
+        ),
+    ]
+
+    def _check_dmesg(self) -> List[DiagResult]:
+        """解析 dmesg 内核日志，检测 panic / OOM / 硬件错误等关键异常。"""
+        results = []
+        lines_limit = self.config.get("thresholds", {}).get("dmesg_lines", 2000)
+        cmd_result = run_command(
+            ["dmesg", "--level=err,crit,alert,emerg", "--notime"],
+            timeout=10.0,
+        )
+
+        if not cmd_result.success:
+            # dmesg may require elevated privileges; degrade gracefully
+            return results
+
+        output = cmd_result.stdout
+        lines = output.splitlines()[-lines_limit:]
+
+        matched: dict = {}  # pattern label → first matching line
+        for line in lines:
+            for pattern, label, status, severity, error_code in self._DMESG_PATTERNS:
+                if label not in matched and pattern.search(line):
+                    matched[label] = (line.strip(), status, severity, error_code)
+
+        for label, (sample, status, severity, error_code) in matched.items():
+            results.append(
+                DiagResult(
+                    module_name=self.name,
+                    item_name=f"dmesg: {label}",
+                    status=status,
+                    severity=severity,
+                    message=f"Detected in dmesg: {sample[:200]}",
+                    metrics={"sample": sample[:200]},
+                    error_code=error_code,
+                )
+            )
+
+        if not matched:
+            results.append(
+                DiagResult(
+                    module_name=self.name,
+                    item_name="dmesg Anomalies",
+                    status=Status.PASS,
+                    severity=Severity.INFO,
+                    message="No critical kernel anomalies found in dmesg.",
+                )
+            )
+
+        return results
+
+    # ── journalctl 服务失败检测 ──
+
+    def _check_journal(self) -> List[DiagResult]:
+        """通过 journalctl 检测近期 systemd 服务失败。"""
+        results = []
+        since = self.config.get("thresholds", {}).get(
+            "journal_since", "24 hours ago"
+        )
+        cmd_result = run_command(
+            [
+                "journalctl",
+                "--priority=err",
+                f"--since={since}",
+                "--no-pager",
+                "--quiet",
+            ],
+            timeout=15.0,
+        )
+
+        if not cmd_result.success:
+            # journalctl not available (e.g., non-systemd system)
+            return results
+
+        lines = [l for l in cmd_result.stdout.splitlines() if l.strip()]
+        failed_services: set = set()
+        fail_re = re.compile(
+            r"([\w@\-\.]+\.service).*(failed|start request repeated too quickly)",
+            re.IGNORECASE,
+        )
+        for line in lines:
+            m = fail_re.search(line)
+            if m:
+                failed_services.add(m.group(1))
+
+        if failed_services:
+            results.append(
+                DiagResult(
+                    module_name=self.name,
+                    item_name="Systemd Service Failures",
+                    status=Status.WARN,
+                    severity=Severity.MAJOR,
+                    message=f"Failed services detected: {', '.join(sorted(failed_services))}",
+                    metrics={"failed_services": sorted(failed_services)},
+                    error_code="INFRA_SERVICE_FAILED",
+                )
+            )
+        else:
+            results.append(
+                DiagResult(
+                    module_name=self.name,
+                    item_name="Systemd Service Failures",
+                    status=Status.PASS,
+                    severity=Severity.INFO,
+                    message=f"No service failures found in journal (since: {since}).",
+                )
+            )
+
+        return results
+
+    # ── 启动耗时分析 ──
+
+    def _check_boot(self) -> List[DiagResult]:
+        """使用 systemd-analyze 检测启动耗时瓶颈。"""
+        results = []
+        boot_warn_s = self.config.get("thresholds", {}).get("boot_time_warn_s", 60)
+        boot_fail_s = self.config.get("thresholds", {}).get("boot_time_fail_s", 120)
+
+        cmd_result = run_command(["systemd-analyze"], timeout=10.0)
+        if not cmd_result.success:
+            return results
+
+        # Parse total boot time, e.g.:
+        # "Startup finished in 3.891s (kernel) + 12.345s (userspace) = 16.236s"
+        time_match = re.search(
+            r"Startup finished in.*=\s*([\d.]+)(min\s+)?([\d.]+)?s", cmd_result.stdout
+        )
+        total_s = None
+        if time_match:
+            # May be "X min Y.Zs" or just "X.Ys"
+            if time_match.group(2):  # minutes present
+                total_s = float(time_match.group(1)) * 60 + float(
+                    time_match.group(3) or 0
+                )
+            else:
+                total_s = float(time_match.group(1))
+
+        if total_s is None:
+            # Try simpler pattern for kernel+userspace total
+            simple = re.search(r"=\s*([\d.]+)s", cmd_result.stdout)
+            if simple:
+                total_s = float(simple.group(1))
+
+        if total_s is not None:
+            if total_s >= boot_fail_s:
+                status, severity, error_code = (
+                    Status.FAIL,
+                    Severity.CRITICAL,
+                    "INFRA_BOOT_SLOW",
+                )
+            elif total_s >= boot_warn_s:
+                status, severity, error_code = (
+                    Status.WARN,
+                    Severity.MAJOR,
+                    "INFRA_BOOT_SLOW",
+                )
+            else:
+                status, severity, error_code = Status.PASS, Severity.INFO, ""
+
+            results.append(
+                DiagResult(
+                    module_name=self.name,
+                    item_name="Boot Time",
+                    status=status,
+                    severity=severity,
+                    message=f"System boot completed in {total_s:.1f}s "
+                    f"(warn: {boot_warn_s}s, fail: {boot_fail_s}s)",
+                    metrics={"boot_time_s": round(total_s, 1)},
+                    error_code=error_code,
+                )
+            )
+
+        # Report the top slow units (blame)
+        blame_result = run_command(
+            ["systemd-analyze", "blame", "--no-pager"], timeout=10.0
+        )
+        if blame_result.success:
+            slow_units = []
+            for line in blame_result.stdout.splitlines()[:5]:
+                line = line.strip()
+                if line:
+                    slow_units.append(line)
+            if slow_units:
+                results.append(
+                    DiagResult(
+                        module_name=self.name,
+                        item_name="Boot Slowest Units",
+                        status=Status.PASS,
+                        severity=Severity.INFO,
+                        message="Top 5 slowest boot units: " + "; ".join(slow_units),
+                        metrics={"slow_units": slow_units},
+                    )
+                )
+
+        return results
+
+    # ── 崩溃转储检测 ──
+
+    _VMCORE_DIRS = [
+        "/var/crash",
+        "/var/lib/systemd/coredump",
+        "/var/kdump",
+    ]
+
+    def _check_kernel_crash(self) -> List[DiagResult]:
+        """检查是否存在未处理的内核崩溃转储 (kdump / systemd-coredump)。"""
+        results = []
+        found_dumps: List[str] = []
+
+        for crash_dir in self._VMCORE_DIRS:
+            if not os.path.isdir(crash_dir):
+                continue
+            try:
+                for entry in os.scandir(crash_dir):
+                    # Count both vmcore files and crash subdirectories
+                    # (kdump creates per-crash directories; systemd-coredump stores individual files)
+                    if entry.is_file() or entry.is_dir(follow_symlinks=False):
+                        found_dumps.append(entry.path)
+            except PermissionError:
+                logger.warning(f"Permission denied reading {crash_dir}")
+
+        if found_dumps:
+            results.append(
+                DiagResult(
+                    module_name=self.name,
+                    item_name="Kernel Crash Dumps",
+                    status=Status.WARN,
+                    severity=Severity.MAJOR,
+                    message=f"{len(found_dumps)} crash dump(s) found: "
+                    + ", ".join(found_dumps[:5]),
+                    metrics={"crash_dump_count": len(found_dumps)},
+                    error_code="INFRA_CRASH_DUMP_FOUND",
+                )
+            )
+        else:
+            results.append(
+                DiagResult(
+                    module_name=self.name,
+                    item_name="Kernel Crash Dumps",
+                    status=Status.PASS,
+                    severity=Severity.INFO,
+                    message="No kernel crash dumps found.",
                 )
             )
 
