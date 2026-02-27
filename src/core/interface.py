@@ -28,20 +28,20 @@ class Status(Enum):
     WARN = "WARN"
     FAIL = "FAIL"
     SKIP = "SKIP"
-    ERROR = "ERROR"  # 新增：探针自身异常（区别于被诊断对象的 FAIL）
+    ERROR = "ERROR"  # Probe internal error (distinct from FAIL on the diagnosed target)
 
 
 class Severity(Enum):
-    """严重等级，影响是否阻断后续诊断"""
+    """Severity level that determines whether downstream probes are blocked."""
 
-    CRITICAL = "CRITICAL"  # 阻断性故障，下游探针应跳过
-    MAJOR = "MAJOR"  # 重要故障
-    MINOR = "MINOR"  # 轻微异常
-    INFO = "INFO"  # 信息采集
+    CRITICAL = "CRITICAL"  # Blocking failure; downstream probes should be skipped
+    MAJOR = "MAJOR"  # Important fault
+    MINOR = "MINOR"  # Minor anomaly
+    INFO = "INFO"  # Informational
 
 
 class Phase(Enum):
-    """诊断阶段：Discovery / Validation / Startup"""
+    """Diagnostic phase: Discovery / Validation / Startup"""
 
     DISCOVERY = "DISCOVERY"
     VALIDATION = "VALIDATION"
@@ -49,7 +49,7 @@ class Phase(Enum):
 
 
 class ProbeType(Enum):
-    """K8s 风格探针类型"""
+    """Kubernetes-style probe type"""
 
     LIVENESS = "LIVENESS"
     READINESS = "READINESS"
@@ -67,12 +67,12 @@ class DiagResult:
     probe_type: ProbeType = ProbeType.READINESS
     metrics: Dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
-    remediation: str = ""  # 修复建议直接附带在结果中
-    error_code: str = ""  # 机器可读的错误编码，例如 "PTP_OFFSET_HIGH"
+    remediation: str = ""  # Remediation suggestion attached directly to the result
+    error_code: str = ""  # Machine-readable error code, e.g. "PTP_OFFSET_HIGH"
 
 
 class IDiagnosticProbe(ABC):
-    """所有诊断模块必须实现的基类"""
+    """Base class that all diagnostic modules must implement."""
 
     def __init__(self, config: Dict):
         self.config = config
@@ -80,42 +80,41 @@ class IDiagnosticProbe(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
-        """模块名称"""
+        """Module name."""
         ...
 
     @property
     def dependencies(self) -> List[str]:
-        """声明前置依赖的探针名称列表，引擎据此做拓扑排序"""
+        """Declare prerequisite probe names; the engine uses this for topological sorting."""
         return []
 
     @property
     def timeout_seconds(self) -> float:
-        """单个探针的最大执行时间"""
+        """Maximum execution time for a single probe."""
         return 10.0
 
-    @abstractmethod
     def run_check(self) -> List[DiagResult]:
-        """执行诊断逻辑"""
-        ...
+        """Run diagnostic logic (subclasses may override; or override discovery/liveness/readiness instead)."""
+        return []
 
     def discovery(self) -> List[DiagResult]:
-        """Discovery Phase: 发现设备/拓扑（无损、快速）"""
+        """Discovery phase: detect devices/topology (non-destructive, fast)."""
         return []
 
     def liveness(self) -> List[DiagResult]:
-        """Liveness Probe: 设备存在且响应"""
+        """Liveness probe: device is present and responding."""
         return []
 
     def readiness(self) -> List[DiagResult]:
-        """Readiness Probe: 数据质量/性能达标"""
+        """Readiness probe: data quality and performance are within spec."""
         return self.run_check()
 
     def startup(self) -> List[DiagResult]:
-        """Startup Probe: 冷启动初始化序列检查"""
+        """Startup probe: cold-start initialization sequence check."""
         return []
 
     def on_dependency_failed(self, failed_dep: str) -> List[DiagResult]:
-        """当前置依赖失败时的默认行为：生成 SKIP 结果"""
+        """Default behavior when a prerequisite dependency fails: generate SKIP result."""
         return [
             DiagResult(
                 module_name=self.name,
