@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class DiagnosticEngine:
-    """诊断执行引擎：负责依赖解析、调度执行、超时控制、错误隔离"""
+    """Diagnostic execution engine: handles dependency resolution, scheduling, timeout control, and error isolation."""
 
     def __init__(self, config: Dict):
         self.config = config
@@ -35,12 +35,12 @@ class DiagnosticEngine:
         self._results: Dict[str, List[DiagResult]] = {}
 
     def register(self, probe_cls: Type[IDiagnosticProbe]):
-        """注册探针类"""
+        """Register a probe class."""
         probe = probe_cls(self.config)
         self._probes[probe.name] = probe
 
     def _topological_sort(self) -> List[str]:
-        """对探针做拓扑排序，处理依赖关系"""
+        """Topological sort of probes to resolve dependency order."""
         in_degree = defaultdict(int)
         graph = defaultdict(list)
         all_names = set(self._probes.keys())
@@ -70,7 +70,7 @@ class DiagnosticEngine:
     async def _run_probe_safe(
         self, probe: IDiagnosticProbe, method_name: str
     ) -> List[DiagResult]:
-        """安全执行单个探针阶段：超时控制 + 异常隔离"""
+        """Safely execute a single probe phase with timeout and exception isolation."""
         try:
             loop = asyncio.get_event_loop()
             method = getattr(probe, method_name)
@@ -109,7 +109,7 @@ class DiagnosticEngine:
             ]
 
     def _check_dependencies_passed(self, probe: IDiagnosticProbe) -> str | None:
-        """检查前置依赖是否通过，返回第一个失败的依赖名称"""
+        """Check if prerequisite dependencies passed; returns the first failing dependency name."""
         for dep_name in probe.dependencies:
             dep_results = self._results.get(dep_name, [])
             has_critical_failure = any(
@@ -122,7 +122,7 @@ class DiagnosticEngine:
         return None
 
     async def run_all(self) -> List[DiagResult]:
-        """按依赖拓扑顺序执行所有探针"""
+        """Execute all probes in topological dependency order."""
         execution_order = self._topological_sort()
         all_results: List[DiagResult] = []
 
@@ -152,14 +152,14 @@ class DiagnosticEngine:
                 if not enabled:
                     continue
 
-                # 检查依赖
+                # Check dependencies
                 failed_dep = self._check_dependencies_passed(probe)
                 if failed_dep:
                     results = probe.on_dependency_failed(failed_dep)
                 else:
                     results = await self._run_probe_safe(probe, method_name)
 
-                # 若结果未显式标注非默认 phase，则用当前执行阶段补齐
+                # Stamp every result with the phase of the currently-executing method
                 for r in results:
                     r.phase = phase
 
@@ -171,5 +171,5 @@ class DiagnosticEngine:
         return all_results
 
     def run(self) -> List[DiagResult]:
-        """同步入口"""
+        """Synchronous entry point."""
         return asyncio.run(self.run_all())

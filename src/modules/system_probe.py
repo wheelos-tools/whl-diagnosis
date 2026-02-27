@@ -17,17 +17,17 @@
 
 
 """
-系统基础设施诊断模块
+System infrastructure diagnostic module
 
-功能:
-  - CPU 核心数 / 温度 / 频率降频检测
-  - 内存使用率
-  - 磁盘剩余空间与 SMART 状态
-  - PCIe 带宽协商检测 (x16 降级为 x8 等)
-  - 内核日志异常检测 (dmesg: panic / OOM / hardware errors)
-  - 系统日志服务失败检测 (journalctl)
-  - 启动耗时分析 (systemd-analyze)
-  - 崩溃转储检测 (kdump / vmcore)
+Features:
+  - CPU core count / temperature / frequency throttle detection
+  - Memory usage
+  - Disk free space and SMART status
+  - PCIe bandwidth negotiation detection (e.g. x16 downgraded to x8)
+  - Kernel log anomaly detection (dmesg: panic / OOM / hardware errors)
+  - System log service failure detection (journalctl)
+  - Boot time analysis (systemd-analyze)
+  - Crash dump detection (kdump / vmcore)
 """
 
 import os
@@ -64,12 +64,12 @@ class SystemProbe(IDiagnosticProbe):
         results.extend(self._check_kernel_crash())
         return results
 
-    # ── CPU 检查 ──
+    # ── CPU checks ──
 
     def _check_cpu(self) -> List[DiagResult]:
         results = []
 
-        # CPU 核心数
+        # CPU core count
         expected_cores = self.config.get("infrastructure", {}).get(
             "expected_cpu_cores", 1
         )
@@ -94,16 +94,16 @@ class SystemProbe(IDiagnosticProbe):
                     status=Status.WARN,
                     severity=Severity.MAJOR,
                     message=f"Only {actual_cores} cores (expected {expected_cores}). "
-                    "检查是否有核心被 isolcpus 隔离或被 offline。",
+                    "Check if cores are isolated by isolcpus or brought offline.",
                     metrics={"cpu_cores": actual_cores},
                     error_code="INFRA_CPU_CORE_MISMATCH",
                 )
             )
 
-        # CPU 温度 (通过 hwmon)
+        # CPU temperature (via hwmon)
         results.extend(self._check_cpu_temperature())
 
-        # CPU 频率降频检测
+        # CPU frequency throttle check
         results.extend(self._check_cpu_frequency())
 
         return results
@@ -112,13 +112,13 @@ class SystemProbe(IDiagnosticProbe):
         results = []
         threshold = self.config.get("thresholds", {}).get("cpu_temp_c", 90)
 
-        # 遍历 hwmon 目录查找 CPU 温度传感器
+        # Scan hwmon directories for CPU temperature sensors
         hwmon_dirs = glob.glob("/sys/class/hwmon/hwmon*/")
         for hwmon in hwmon_dirs:
             name_file = os.path.join(hwmon, "name")
             name = read_sysfs(name_file)
             if name and name in ("coretemp", "k10temp", "zenpower"):
-                # 找到 CPU 温度传感器
+                # Found CPU temperature sensor
                 temp_files = glob.glob(os.path.join(hwmon, "temp*_input"))
                 max_temp = 0
                 for tf in temp_files:
@@ -164,7 +164,7 @@ class SystemProbe(IDiagnosticProbe):
         return results
 
     def _check_cpu_frequency(self) -> List[DiagResult]:
-        """检测 CPU 是否被降频 (governor 不是 performance)"""
+        """Detect CPU throttling (governor is not 'performance')."""
         results = []
         governors = set()
 
@@ -193,7 +193,7 @@ class SystemProbe(IDiagnosticProbe):
                         status=Status.WARN,
                         severity=Severity.MAJOR,
                         message=f"CPU governor(s): {governors}. "
-                        "建议 AD 系统使用 'performance' 以避免延迟抖动。",
+                        "Recommend setting 'performance' governor to avoid latency jitter.",
                         metrics={"governors": list(governors)},
                         error_code="INFRA_CPU_GOV_NOT_PERF",
                     )
@@ -201,7 +201,7 @@ class SystemProbe(IDiagnosticProbe):
 
         return results
 
-    # ── Memory 检查 ──
+    # ── Memory checks ──
 
     def _check_memory(self) -> List[DiagResult]:
         results = []
@@ -250,7 +250,7 @@ class SystemProbe(IDiagnosticProbe):
 
         return results
 
-    # ── Disk 检查 ──
+    # ── Disk checks ──
 
     def _check_disk(self) -> List[DiagResult]:
         results = []
@@ -271,7 +271,7 @@ class SystemProbe(IDiagnosticProbe):
                         status=Status.FAIL,
                         severity=Severity.CRITICAL,
                         message=f"Only {free_gb:.1f}GB free (minimum: {min_free_gb}GB). "
-                        "路测数据可能无法写入!",
+                        "Road-test data may fail to write!",
                         metrics={
                             "free_gb": round(free_gb, 1),
                             "total_gb": round(total_gb, 1),
@@ -305,17 +305,17 @@ class SystemProbe(IDiagnosticProbe):
                 )
             )
 
-        # SMART 状态检查
+        # SMART health check
         results.extend(self._check_smart())
 
         return results
 
     def _check_smart(self) -> List[DiagResult]:
-        """通过 smartctl 检查磁盘 SMART 健康状态"""
+        """Check disk SMART health status via smartctl."""
         results = []
         cmd_result = run_command(["smartctl", "--scan"], timeout=5.0)
         if not cmd_result.success:
-            return results  # smartctl 未安装，跳过
+            return results  # smartctl not installed, skip
 
         for line in cmd_result.stdout.strip().split("\n"):
             if not line.strip():
@@ -341,7 +341,7 @@ class SystemProbe(IDiagnosticProbe):
                         item_name=f"SMART ({device})",
                         status=Status.FAIL,
                         severity=Severity.CRITICAL,
-                        message=f"SMART health: FAILED! 磁盘即将故障，请立即更换!",
+                        message="SMART health: FAILED! Disk is failing, replace immediately!",
                         metrics={"device": device, "smart": "FAILED"},
                         error_code="INFRA_DISK_SMART_FAIL",
                     )
@@ -349,23 +349,24 @@ class SystemProbe(IDiagnosticProbe):
 
         return results
 
-    # ── PCIe 检查 ──
+    # ── PCIe checks ──
 
     def _check_pcie(self) -> List[DiagResult]:
         """
-        检测 PCIe 设备是否发生带宽降级。
-        例如：GPU 应该是 x16 但协商为 x8，说明金手指接触不良或线缆问题。
+        Detect PCIe bandwidth downgrade.
+        E.g. GPU capable of x16 but negotiated x8, indicating poor gold-finger
+        contact or a cable issue.
         """
         results = []
         cmd_result = run_command(["lspci", "-vv"], timeout=10.0)
         if not cmd_result.success:
             return results
 
-        # 解析 lspci 输出，查找 LnkCap vs LnkSta
+        # Parse lspci output to find LnkCap vs LnkSta
         current_device = ""
         link_cap = ""
         for line in cmd_result.stdout.split("\n"):
-            # 设备行
+            # Device line
             device_match = re.match(r"^([0-9a-f]{2}:[0-9a-f]{2}\.\d)\s+(.+)", line)
             if device_match:
                 current_device = f"{device_match.group(1)} {device_match.group(2)}"
@@ -382,7 +383,7 @@ class SystemProbe(IDiagnosticProbe):
                 cap_width = int(link_cap)
                 sta_width = int(link_sta)
 
-                # 只报告降级的高带宽设备 (x4 以上)
+                # Only report degraded high-bandwidth devices (x4 and above)
                 if cap_width >= 4 and sta_width < cap_width:
                     results.append(
                         DiagResult(
@@ -391,7 +392,7 @@ class SystemProbe(IDiagnosticProbe):
                             status=Status.WARN,
                             severity=Severity.MAJOR,
                             message=f"PCIe degraded: capable x{cap_width}, "
-                            f"negotiated x{sta_width}. 检查物理连接。",
+                            f"negotiated x{sta_width}. Check physical connection.",
                             metrics={
                                 "device": current_device,
                                 "capable_width": cap_width,
@@ -415,7 +416,7 @@ class SystemProbe(IDiagnosticProbe):
 
         return results
 
-    # ── dmesg 内核日志异常检测 ──
+    # ── dmesg kernel log anomaly detection ──
 
     # Patterns that indicate critical kernel-level events
     _DMESG_PATTERNS = [
@@ -465,7 +466,7 @@ class SystemProbe(IDiagnosticProbe):
     ]
 
     def _check_dmesg(self) -> List[DiagResult]:
-        """解析 dmesg 内核日志，检测 panic / OOM / 硬件错误等关键异常。"""
+        """Parse dmesg kernel log to detect critical anomalies: panic, OOM, hardware errors."""
         results = []
         lines_limit = self.config.get("thresholds", {}).get("dmesg_lines", 2000)
         cmd_result = run_command(
@@ -512,10 +513,10 @@ class SystemProbe(IDiagnosticProbe):
 
         return results
 
-    # ── journalctl 服务失败检测 ──
+    # ── journalctl service failure detection ──
 
     def _check_journal(self) -> List[DiagResult]:
-        """通过 journalctl 检测近期 systemd 服务失败。"""
+        """Detect recent systemd service failures via journalctl."""
         results = []
         since = self.config.get("thresholds", {}).get(
             "journal_since", "24 hours ago"
@@ -571,10 +572,10 @@ class SystemProbe(IDiagnosticProbe):
 
         return results
 
-    # ── 启动耗时分析 ──
+    # ── Boot time analysis ──
 
     def _check_boot(self) -> List[DiagResult]:
-        """使用 systemd-analyze 检测启动耗时瓶颈。"""
+        """Detect boot time bottlenecks using systemd-analyze."""
         results = []
         boot_warn_s = self.config.get("thresholds", {}).get("boot_time_warn_s", 60)
         boot_fail_s = self.config.get("thresholds", {}).get("boot_time_fail_s", 120)
@@ -657,7 +658,7 @@ class SystemProbe(IDiagnosticProbe):
 
         return results
 
-    # ── 崩溃转储检测 ──
+    # ── Crash dump detection ──
 
     _VMCORE_DIRS = [
         "/var/crash",
@@ -666,7 +667,7 @@ class SystemProbe(IDiagnosticProbe):
     ]
 
     def _check_kernel_crash(self) -> List[DiagResult]:
-        """检查是否存在未处理的内核崩溃转储 (kdump / systemd-coredump)。"""
+        """Check for unprocessed kernel crash dumps (kdump / systemd-coredump)."""
         results = []
         found_dumps: List[str] = []
 
