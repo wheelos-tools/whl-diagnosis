@@ -13,20 +13,6 @@ infrastructure:
   storage:
     data_path: /data
     min_free_gb: 50
-middleware:
-  critical_processes:
-  - expected: true
-    name: perception_node
-  - expected: true
-    name: planning_node
-  critical_topics:
-  - expected_hz: 10
-    max_latency_ms: 100
-    name: /perception/obstacles
-  - expected_hz: 100
-    max_latency_ms: 20
-    name: /localization/pose
-  type: ros2
 network:
   interfaces:
   - expected_mtu: 9000

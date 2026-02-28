@@ -31,15 +31,15 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         import sys
         candidates = [
             Path(__file__).parent / "templates" / "dashboard.html",
-            Path.cwd() / "src" / "api" / "templates" / "dashboard.html",
+            Path.cwd() / "whl_diag" / "api" / "templates" / "dashboard.html",
             Path.cwd() / "api" / "templates" / "dashboard.html",
             Path.cwd() / "templates" / "dashboard.html",
         ]
         # Also try sys.path entries
         for p in sys.path:
             p = Path(p)
-            if (p / "src/api/templates/dashboard.html").exists():
-                candidates.append(p / "src/api/templates/dashboard.html")
+            if (p / "whl_diag/api/templates/dashboard.html").exists():
+                candidates.append(p / "whl_diag/api/templates/dashboard.html")
             if (p / "api/templates/dashboard.html").exists():
                 candidates.append(p / "api/templates/dashboard.html")
             if (p / "templates/dashboard.html").exists():
