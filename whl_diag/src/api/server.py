@@ -20,9 +20,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import os
 
-from src.execution.probe_catalog import PROBE_CATALOG
-from src.execution.workflow import run_diagnostics
-from src.output.reporter import JsonReporter
+from whl_diag.execution.probe_catalog import PROBE_CATALOG
+from whl_diag.execution.workflow import run_diagnostics
+from whl_diag.output.reporter import JsonReporter
 
 
 class DiagnosticHandler(BaseHTTPRequestHandler):
@@ -84,7 +84,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                      return
 
                 results, metadata, _ = run_diagnostics(config_path=config_path)
-                from src.output.reporter import HtmlReporter
+                from whl_diag.output.reporter import HtmlReporter
                 html = HtmlReporter().generate(results, metadata)
 
                 raw = html.encode("utf-8")

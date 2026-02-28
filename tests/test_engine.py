@@ -19,8 +19,8 @@
 import unittest
 import time
 
-from src.execution.engine import DiagnosticEngine
-from src.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity, Phase
+from whl_diag.execution.engine import DiagnosticEngine
+from whl_diag.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity, Phase
 
 
 class DummyProbe(IDiagnosticProbe):

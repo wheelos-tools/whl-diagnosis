@@ -28,7 +28,7 @@ import logging
 import re
 from typing import List, Dict
 
-from src.execution.interface import (
+from whl_diag.execution.interface import (
     IDiagnosticProbe,
     DiagResult,
     Status,
@@ -36,8 +36,8 @@ from src.execution.interface import (
     Phase,
     ProbeType,
 )
-from src.state.fingerprint import check_and_update
-from src.utils.shell_runner import run_command
+from whl_diag.state.fingerprint import check_and_update
+from whl_diag.utils.shell_runner import run_command
 
 logger = logging.getLogger(__name__)
 

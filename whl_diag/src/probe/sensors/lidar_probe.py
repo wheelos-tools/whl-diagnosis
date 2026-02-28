@@ -25,7 +25,7 @@ import socket
 import time
 from typing import List
 
-from src.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity
+from whl_diag.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity
 
 
 class LiDARProbe(IDiagnosticProbe):

@@ -18,9 +18,9 @@
 import unittest
 from unittest.mock import patch
 
-from src.utils.shell_runner import CommandResult
-from src.execution.interface import Status
-from src.probe.network.ptp_probe import PTPProbe
+from whl_diag.utils.shell_runner import CommandResult
+from whl_diag.execution.interface import Status
+from whl_diag.probe.network.ptp_probe import PTPProbe
 
 
 class PTPProbeTests(unittest.TestCase):

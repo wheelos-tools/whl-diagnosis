@@ -31,7 +31,7 @@ import logging
 import re
 from typing import List, Dict
 
-from src.execution.interface import (
+from whl_diag.execution.interface import (
     IDiagnosticProbe,
     DiagResult,
     Status,
@@ -39,7 +39,7 @@ from src.execution.interface import (
     Phase,
     ProbeType,
 )
-from src.utils.shell_runner import run_command, read_sysfs
+from whl_diag.utils.shell_runner import run_command, read_sysfs
 
 logger = logging.getLogger(__name__)
 

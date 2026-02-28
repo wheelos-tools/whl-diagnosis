@@ -19,9 +19,9 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
-from src.utils.shell_runner import CommandResult
-from src.execution.interface import Status, Severity
-from src.probe.software.system_probe import SystemProbe
+from whl_diag.utils.shell_runner import CommandResult
+from whl_diag.execution.interface import Status, Severity
+from whl_diag.probe.software.system_probe import SystemProbe
 
 
 def _probe(extra_cfg=None):
