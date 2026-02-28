@@ -19,8 +19,8 @@
 import unittest
 from unittest.mock import patch
 
-from src.core.interface import Status
-from src.modules.network_probe import NetworkLinkProbe
+from src.execution.interface import Status
+from src.probe.network.network_probe import NetworkLinkProbe
 
 
 class NetworkProbeTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class NetworkProbeTests(unittest.TestCase):
         config = {"network": {"interfaces": [{"name": "ethX", "role": "data"}]}}
         probe = NetworkLinkProbe(config)
 
-        with patch("src.modules.network_probe.read_sysfs", return_value=None):
+        with patch("src.probe.network.network_probe.read_sysfs", return_value=None):
             results = probe.discovery()
 
         self.assertEqual(results[0].status, Status.FAIL)
@@ -57,7 +57,7 @@ class NetworkProbeTests(unittest.TestCase):
                 return "up"
             return None
 
-        with patch("src.modules.network_probe.read_sysfs", side_effect=fake_read_sysfs):
+        with patch("src.probe.network.network_probe.read_sysfs", side_effect=fake_read_sysfs):
             results = probe.readiness()
 
         error_codes = {r.error_code for r in results}

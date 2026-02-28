@@ -1,0 +1,23 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://wheelos-tools/whl-diagnosis/topology_schema.json",
+	"title": "VehicleTopologyConfig",
+	"type": "object",
+	"required": ["vehicle_type", "thresholds", "time_sync", "sensors", "network", "middleware"],
+	"properties": {
+		"vehicle_type": { "type": "string" },
+		"vehicle_id": { "type": "string" },
+		"description": { "type": "string" },
+		"config_version": { "type": "string" },
+		"diagnosis_mode": { "type": "string", "enum": ["default", "diagnostic", "stress"] },
+		"startup_check": { "type": "boolean" },
+		"thresholds": { "type": "object" },
+		"infrastructure": { "type": "object" },
+		"time_sync": { "type": "object" },
+		"sensors": { "type": "object" },
+		"network": { "type": "object" },
+		"middleware": { "type": "object" }
+	},
+	"additionalProperties": false
+}
+

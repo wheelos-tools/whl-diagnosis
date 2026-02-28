@@ -1,0 +1,6 @@
+# Include all source files and config files
+include README.md
+include LICENSE
+recursive-include src *
+recursive-include config *
+recursive-include docs *

@@ -19,8 +19,8 @@ import unittest
 from unittest.mock import patch
 
 from src.utils.shell_runner import CommandResult
-from src.core.interface import Status
-from src.modules.network_probe import PTPProbe
+from src.execution.interface import Status
+from src.probe.network.ptp_probe import PTPProbe
 
 
 class PTPProbeTests(unittest.TestCase):
@@ -34,7 +34,7 @@ class PTPProbeTests(unittest.TestCase):
         pmc_output = "offsetFromMaster 120\n gmIdentity 00:11:33"
 
         with patch(
-            "src.modules.network_probe.run_command",
+            "src.probe.network.ptp_probe.run_command",
             return_value=CommandResult(0, pmc_output, ""),
         ):
             results = probe.readiness()

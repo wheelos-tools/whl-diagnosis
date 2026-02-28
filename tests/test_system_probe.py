@@ -20,8 +20,8 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from src.utils.shell_runner import CommandResult
-from src.core.interface import Status, Severity
-from src.modules.system_probe import SystemProbe
+from src.execution.interface import Status, Severity
+from src.probe.software.system_probe import SystemProbe
 
 
 def _probe(extra_cfg=None):
@@ -49,8 +49,8 @@ def _probe(extra_cfg=None):
 class CpuCoreTests(unittest.TestCase):
     def test_pass_when_cores_sufficient(self):
         probe = _probe({"infrastructure": {"expected_cpu_cores": 1}})
-        with patch("src.modules.system_probe.os.cpu_count", return_value=4), patch(
-            "src.modules.system_probe.glob.glob", return_value=[]
+        with patch("src.probe.software.system_probe.os.cpu_count", return_value=4), patch(
+            "src.probe.software.system_probe.glob.glob", return_value=[]
         ):
             results = probe._check_cpu()
         core_result = next(r for r in results if r.item_name == "CPU Core Count")
@@ -58,8 +58,8 @@ class CpuCoreTests(unittest.TestCase):
 
     def test_warn_when_cores_insufficient(self):
         probe = _probe()
-        with patch("src.modules.system_probe.os.cpu_count", return_value=1), patch(
-            "src.modules.system_probe.glob.glob", return_value=[]
+        with patch("src.probe.software.system_probe.os.cpu_count", return_value=1), patch(
+            "src.probe.software.system_probe.glob.glob", return_value=[]
         ):
             results = probe._check_cpu()
         core_result = next(r for r in results if r.item_name == "CPU Core Count")
@@ -80,11 +80,11 @@ class CpuTemperatureTests(unittest.TestCase):
             return None
 
         with patch(
-            "src.modules.system_probe.glob.glob",
+            "src.probe.software.system_probe.glob.glob",
             side_effect=lambda p: (
                 [fake_hwmon] if "hwmon*/" in p else [fake_hwmon + "temp1_input"]
             ),
-        ), patch("src.modules.system_probe.read_sysfs", side_effect=fake_read_sysfs):
+        ), patch("src.probe.software.system_probe.read_sysfs", side_effect=fake_read_sysfs):
             results = probe._check_cpu_temperature()
 
         self.assertTrue(any(r.item_name == "CPU Temperature" for r in results))
@@ -103,11 +103,11 @@ class CpuTemperatureTests(unittest.TestCase):
             return None
 
         with patch(
-            "src.modules.system_probe.glob.glob",
+            "src.probe.software.system_probe.glob.glob",
             side_effect=lambda p: (
                 [fake_hwmon] if "hwmon*/" in p else [fake_hwmon + "temp1_input"]
             ),
-        ), patch("src.modules.system_probe.read_sysfs", side_effect=fake_read_sysfs):
+        ), patch("src.probe.software.system_probe.read_sysfs", side_effect=fake_read_sysfs):
             results = probe._check_cpu_temperature()
 
         temp_result = next(r for r in results if r.item_name == "CPU Temperature")
@@ -119,10 +119,10 @@ class CpuGovernorTests(unittest.TestCase):
     def test_pass_all_performance(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.glob.glob",
+            "src.probe.software.system_probe.glob.glob",
             return_value=["/sys/devices/system/cpu/cpufreq/policy0/"],
         ), patch(
-            "src.modules.system_probe.read_sysfs", return_value="performance"
+            "src.probe.software.system_probe.read_sysfs", return_value="performance"
         ):
             results = probe._check_cpu_frequency()
         self.assertEqual(results[0].status, Status.PASS)
@@ -130,10 +130,10 @@ class CpuGovernorTests(unittest.TestCase):
     def test_warn_non_performance_governor(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.glob.glob",
+            "src.probe.software.system_probe.glob.glob",
             return_value=["/sys/devices/system/cpu/cpufreq/policy0/"],
         ), patch(
-            "src.modules.system_probe.read_sysfs", return_value="powersave"
+            "src.probe.software.system_probe.read_sysfs", return_value="powersave"
         ):
             results = probe._check_cpu_frequency()
         self.assertEqual(results[0].status, Status.WARN)
@@ -150,7 +150,7 @@ class MemoryTests(unittest.TestCase):
     def test_pass_when_usage_low(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.read_sysfs",
+            "src.probe.software.system_probe.read_sysfs",
             return_value=self._meminfo(16 * 1024 * 1024, 12 * 1024 * 1024),
         ):
             results = probe._check_memory()
@@ -161,7 +161,7 @@ class MemoryTests(unittest.TestCase):
         total = 16 * 1024 * 1024  # 16 GB in kB
         available = int(total * 0.15)  # 85% used
         with patch(
-            "src.modules.system_probe.read_sysfs",
+            "src.probe.software.system_probe.read_sysfs",
             return_value=self._meminfo(total, available),
         ):
             results = probe._check_memory()
@@ -173,7 +173,7 @@ class MemoryTests(unittest.TestCase):
         total = 16 * 1024 * 1024
         available = int(total * 0.05)  # 95% used
         with patch(
-            "src.modules.system_probe.read_sysfs",
+            "src.probe.software.system_probe.read_sysfs",
             return_value=self._meminfo(total, available),
         ):
             results = probe._check_memory()
@@ -192,8 +192,8 @@ class DiskTests(unittest.TestCase):
         fake_stat.f_frsize = 4096
         fake_stat.f_bavail = 200 * 1024 * 1024 * 1024 // 4096  # 200 GB in blocks
         fake_stat.f_blocks = 500 * 1024 * 1024 * 1024 // 4096  # 500 GB total
-        with patch("src.modules.system_probe.os.statvfs", return_value=fake_stat), patch(
-            "src.modules.system_probe.run_command",
+        with patch("src.probe.software.system_probe.os.statvfs", return_value=fake_stat), patch(
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(1, "", ""),
         ):
             results = probe._check_disk()
@@ -206,8 +206,8 @@ class DiskTests(unittest.TestCase):
         fake_stat.f_frsize = 4096
         fake_stat.f_bavail = 0  # 0 GB free
         fake_stat.f_blocks = 500 * 1024 * 1024 * 1024 // 4096  # 500 GB total
-        with patch("src.modules.system_probe.os.statvfs", return_value=fake_stat), patch(
-            "src.modules.system_probe.run_command",
+        with patch("src.probe.software.system_probe.os.statvfs", return_value=fake_stat), patch(
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(1, "", ""),
         ):
             results = probe._check_disk()
@@ -234,7 +234,7 @@ class PCIeTests(unittest.TestCase):
     def test_detects_pcie_degradation(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(0, self._LSPCI_DEGRADED, ""),
         ):
             results = probe._check_pcie()
@@ -243,7 +243,7 @@ class PCIeTests(unittest.TestCase):
     def test_pass_when_no_degradation(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(0, self._LSPCI_CLEAN, ""),
         ):
             results = probe._check_pcie()
@@ -258,7 +258,7 @@ class DmesgTests(unittest.TestCase):
         probe = _probe()
         dmesg_output = "[123.456] kernel panic - not syncing: VFS: Unable to mount root fs"
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(0, dmesg_output, ""),
         ):
             results = probe._check_dmesg()
@@ -269,7 +269,7 @@ class DmesgTests(unittest.TestCase):
         probe = _probe()
         dmesg_output = "[200.000] Out of memory: Kill process 1234 (myapp) score 900"
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(0, dmesg_output, ""),
         ):
             results = probe._check_dmesg()
@@ -280,7 +280,7 @@ class DmesgTests(unittest.TestCase):
         probe = _probe()
         dmesg_output = "[300.000] EDAC MC0: 1 UE on memory controller 0 (DIMM 0)"
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(0, dmesg_output, ""),
         ):
             results = probe._check_dmesg()
@@ -290,7 +290,7 @@ class DmesgTests(unittest.TestCase):
     def test_pass_when_no_anomalies(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(0, "Everything is fine.", ""),
         ):
             results = probe._check_dmesg()
@@ -301,7 +301,7 @@ class DmesgTests(unittest.TestCase):
     def test_skips_gracefully_when_dmesg_unavailable(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(1, "", "permission denied"),
         ):
             results = probe._check_dmesg()
@@ -320,7 +320,7 @@ class JournalTests(unittest.TestCase):
     def test_detects_failed_service(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(0, self._JOURNAL_FAILED, ""),
         ):
             results = probe._check_journal()
@@ -331,7 +331,7 @@ class JournalTests(unittest.TestCase):
     def test_pass_when_no_failures(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(0, "", ""),
         ):
             results = probe._check_journal()
@@ -340,7 +340,7 @@ class JournalTests(unittest.TestCase):
     def test_skips_when_journalctl_unavailable(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(1, "", "not found"),
         ):
             results = probe._check_journal()
@@ -377,7 +377,7 @@ class BootTests(unittest.TestCase):
     def test_pass_when_boot_fast(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             side_effect=self._fake_run(self._ANALYZE_OK, self._BLAME_OUTPUT),
         ):
             results = probe._check_boot()
@@ -388,7 +388,7 @@ class BootTests(unittest.TestCase):
     def test_warn_when_boot_slow(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             side_effect=self._fake_run(self._ANALYZE_SLOW),
         ):
             results = probe._check_boot()
@@ -399,7 +399,7 @@ class BootTests(unittest.TestCase):
     def test_skips_when_systemd_analyze_unavailable(self):
         probe = _probe()
         with patch(
-            "src.modules.system_probe.run_command",
+            "src.probe.software.system_probe.run_command",
             return_value=CommandResult(1, "", "not found"),
         ):
             results = probe._check_boot()
@@ -412,7 +412,7 @@ class BootTests(unittest.TestCase):
 class KernelCrashTests(unittest.TestCase):
     def test_pass_when_no_crash_dirs(self):
         probe = _probe()
-        with patch("src.modules.system_probe.os.path.isdir", return_value=False):
+        with patch("src.probe.software.system_probe.os.path.isdir", return_value=False):
             results = probe._check_kernel_crash()
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].status, Status.PASS)
@@ -428,9 +428,9 @@ class KernelCrashTests(unittest.TestCase):
             return path == "/var/crash"
 
         with patch(
-            "src.modules.system_probe.os.path.isdir", side_effect=fake_isdir
+            "src.probe.software.system_probe.os.path.isdir", side_effect=fake_isdir
         ), patch(
-            "src.modules.system_probe.os.scandir", return_value=[fake_entry]
+            "src.probe.software.system_probe.os.scandir", return_value=[fake_entry]
         ):
             results = probe._check_kernel_crash()
 

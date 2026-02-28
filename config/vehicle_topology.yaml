@@ -1,101 +1,88 @@
-# 车辆硬件拓扑定义 — 每种车型一个配置文件
-# 支持通过环境变量 AD_DIAG_VEHICLE_TYPE 选择
-
-vehicle_type: "L4_Robotaxi_v2"
-description: "L4级Robotaxi第二代传感器方案"
-
-# 诊断模式
-diagnosis_mode: "default"  # default | diagnostic | stress
-
-# 全局阈值
-thresholds:
-  ptp_offset_ns: 500
-  gpu_temp_c: 85
-  cpu_temp_c: 90
-  min_disk_free_gb: 50
-
-# 基础设施
+aliases:
+  front_main_cam:
+    match_by: usb_serial
+    value: CAM-SN-123
+  sys_eth:
+    match_by: mac_address
+    value: 3c:6d:66:18:33:0b
+description: L4 Robotaxi generation-2 sensor suite
+diagnosis_mode: default
 infrastructure:
-  expected_gpu_count: 2
   expected_cpu_cores: 16
+  expected_gpu_count: 2
   storage:
-    data_path: "/data"
+    data_path: /data
     min_free_gb: 50
-
-# 时间同步
-time_sync:
-  ptp:
-    interface: "eth0"
-    master_ip: "192.168.1.10"
-    domain: 0
-    expected_gm_identity: "00:11:22:ff:fe:33:44:55"
-  gnss:
-    pps_device: "/dev/pps0"
-    nmea_device: "/dev/ttyUSB0"
-    nmea_baud: 115200
-
-# 传感器
-sensors:
-  cameras:
-    - name: "front_main"
-      device: "/dev/video0"
-      serial_number: "CAM-SN-001"  # 硬件指纹
-      expected_fps: 30
-      resolution: "1920x1080"
-    - name: "front_left"
-      device: "/dev/video2"
-      serial_number: "CAM-SN-002"
-      expected_fps: 30
-      resolution: "1920x1080"
-
-  lidars:
-    - name: "top_lidar"
-      type: "velodyne_vlp16"
-      port: 2368
-      expected_packets_per_second: 754
-      sample_duration_s: 2.0
-    - name: "front_lidar"
-      type: "hesai_xt32"
-      port: 2369
-      expected_packets_per_second: 600
-
-  # CAN 总线
-  can:
-    interfaces:
-      - name: "can0"
-        bitrate: 500000
-        expected_messages:
-          - id: "0x123"
-            name: "VehicleSpeed"
-            expected_hz: 100
-          - id: "0x456"
-            name: "SteeringAngle"
-            expected_hz: 50
-
-# 网络
+middleware:
+  critical_processes:
+  - expected: true
+    name: perception_node
+  - expected: true
+    name: planning_node
+  critical_topics:
+  - expected_hz: 10
+    max_latency_ms: 100
+    name: /perception/obstacles
+  - expected_hz: 100
+    max_latency_ms: 20
+    name: /localization/pose
+  type: ros2
 network:
   interfaces:
-    - name: "eth0"
-      role: "ptp_sync"
-      expected_speed: 1000  # Mbps
-      expected_mtu: 9000
-    - name: "eth1"
-      role: "lidar_data"
-      expected_speed: 10000
-      expected_mtu: 9000
-
-# 中间件
-middleware:
-  type: "ros2"  # ros2 | cyber_rt
-  critical_processes:
-    - name: "perception_node"
-      expected: true
-    - name: "planning_node"
-      expected: true
-  critical_topics:
-    - name: "/perception/obstacles"
-      expected_hz: 10
-      max_latency_ms: 100
-    - name: "/localization/pose"
-      expected_hz: 100
-      max_latency_ms: 20
+  - expected_mtu: 9000
+    expected_speed: 1000
+    name: ${sys_eth}
+    role: ptp_sync
+  - expected_mtu: 9000
+    expected_speed: 10000
+    name: eth1
+    role: lidar_data
+sensors:
+  cameras:
+  - device: ${front_main_cam}
+    expected_fps: 30
+    name: front_main
+    resolution: 1920x1080
+    serial_number: CAM-SN-001
+  - device: /dev/video2
+    expected_fps: 30
+    name: front_left
+    resolution: 1920x1080
+    serial_number: CAM-SN-002
+  can:
+    interfaces:
+    - bitrate: 500000
+      expected_messages:
+      - expected_hz: 100
+        id: '0x123'
+        name: VehicleSpeed
+      - expected_hz: 50
+        id: '0x456'
+        name: SteeringAngle
+      name: can0
+  lidars:
+  - expected_packets_per_second: 754
+    name: top_lidar
+    port: 2368
+    sample_duration_s: 2.0
+    type: velodyne_vlp16
+  - expected_packets_per_second: 600
+    name: front_lidar
+    port: 2369
+    type: hesai_xt32
+thresholds:
+  cpu_temp_c: 90
+  gpu_temp_c: 85
+  min_disk_free_gb: 50
+  ptp_offset_ns: 500
+time_sync:
+  gnss:
+    nmea_baud: 115200
+    nmea_device: /dev/ttyUSB0
+    pps_device: /dev/pps0
+  ptp:
+    domain: 0
+    expected_gm_identity: 00:11:22:ff:fe:33:44:55
+    interface: eth0
+    master_ip: 192.168.1.10
+vehicle_type: L4_Robotaxi_v2

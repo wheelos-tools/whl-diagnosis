@@ -17,13 +17,13 @@
 
 
 """
-网络与时间同步诊断模块
+Network and time synchronization diagnostics module
 
-功能:
-  - 网络接口发现 (Discovery)
-  - 链路存活 (Liveness)
-  - 速率/MTU/错误计数 (Readiness)
-  - PTP 同步偏移检测 (Readiness)
+Features:
+    - Interface discovery
+    - Link liveness checks
+    - Speed/MTU/error-counter readiness checks
+    - PTP offset readiness checks
 """
 
 import glob
@@ -31,7 +31,7 @@ import logging
 import re
 from typing import List, Dict
 
-from src.core.interface import (
+from src.execution.interface import (
     IDiagnosticProbe,
     DiagResult,
     Status,
@@ -88,6 +88,8 @@ class NetworkLinkProbe(IDiagnosticProbe):
                         phase=Phase.DISCOVERY,
                         probe_type=ProbeType.LIVENESS,
                         error_code="INFRA_NET_IFACE_MISSING",
+                        raw_output=run_command(["ip", "a"]).stdout,
+                        sys_logs=self.fetch_system_logs(iface, 20),
                     )
                 )
             else:
@@ -126,6 +128,8 @@ class NetworkLinkProbe(IDiagnosticProbe):
                         phase=Phase.VALIDATION,
                         probe_type=ProbeType.LIVENESS,
                         error_code="INFRA_NET_IFACE_MISSING",
+                        raw_output=run_command(["ip", "link", "show", iface]).stdout,
+                        sys_logs=self.fetch_system_logs(iface, 20),
                     )
                 )
             elif operstate == "up":
@@ -153,6 +157,8 @@ class NetworkLinkProbe(IDiagnosticProbe):
                         probe_type=ProbeType.LIVENESS,
                         metrics={"operstate": operstate},
                         error_code="INFRA_NET_LINK_DOWN",
+                        raw_output=run_command(["ethtool", iface]).stdout,
+                        sys_logs=self.fetch_system_logs(iface, 30),
                     )
                 )
 
@@ -268,208 +274,3 @@ class NetworkLinkProbe(IDiagnosticProbe):
         return results
 
 
-class PTPProbe(IDiagnosticProbe):
-
-    @property
-    def name(self) -> str:
-        return "PTP Sync Probe"
-
-    @property
-    def dependencies(self) -> List[str]:
-        return ["Network Link Probe"]
-
-    @property
-    def timeout_seconds(self) -> float:
-        return 12.0
-
-    def discovery(self) -> List[DiagResult]:
-        results = []
-        ptp_cfg = self.config.get("time_sync", {}).get("ptp", {})
-        iface = ptp_cfg.get("interface", "eth0")
-        operstate = read_sysfs(f"/sys/class/net/{iface}/operstate")
-        ptp_devices = glob.glob("/sys/class/ptp/ptp*")
-
-        if operstate is None:
-            results.append(
-                DiagResult(
-                    module_name=self.name,
-                    item_name="PTP Interface",
-                    status=Status.FAIL,
-                    severity=Severity.CRITICAL,
-                    message=f"PTP interface {iface} not found.",
-                    phase=Phase.DISCOVERY,
-                    probe_type=ProbeType.LIVENESS,
-                    error_code="SYNC_PTP_IFACE_MISSING",
-                )
-            )
-        else:
-            results.append(
-                DiagResult(
-                    module_name=self.name,
-                    item_name="PTP Interface",
-                    status=Status.PASS,
-                    severity=Severity.INFO,
-                    message=f"PTP interface {iface} present.",
-                    phase=Phase.DISCOVERY,
-                    probe_type=ProbeType.LIVENESS,
-                    metrics={"interface": iface},
-                )
-            )
-
-        if not ptp_devices:
-            results.append(
-                DiagResult(
-                    module_name=self.name,
-                    item_name="PTP Clock Device",
-                    status=Status.WARN,
-                    severity=Severity.MAJOR,
-                    message="No /sys/class/ptp/ptp* device found.",
-                    phase=Phase.DISCOVERY,
-                    probe_type=ProbeType.LIVENESS,
-                    error_code="SYNC_PTP_CLOCK_MISSING",
-                )
-            )
-        else:
-            results.append(
-                DiagResult(
-                    module_name=self.name,
-                    item_name="PTP Clock Device",
-                    status=Status.PASS,
-                    severity=Severity.INFO,
-                    message=f"PTP clock device(s) detected: {len(ptp_devices)}",
-                    phase=Phase.DISCOVERY,
-                    probe_type=ProbeType.LIVENESS,
-                    metrics={"ptp_device_count": len(ptp_devices)},
-                )
-            )
-
-        return results
-
-    def liveness(self) -> List[DiagResult]:
-        results = []
-        cmd_result = run_command(["pgrep", "-f", "ptp4l"], timeout=3.0)
-        if cmd_result.success and cmd_result.stdout.strip():
-            results.append(
-                DiagResult(
-                    module_name=self.name,
-                    item_name="PTP Service",
-                    status=Status.PASS,
-                    severity=Severity.INFO,
-                    message="ptp4l service running.",
-                    phase=Phase.VALIDATION,
-                    probe_type=ProbeType.LIVENESS,
-                )
-            )
-        else:
-            results.append(
-                DiagResult(
-                    module_name=self.name,
-                    item_name="PTP Service",
-                    status=Status.WARN,
-                    severity=Severity.MAJOR,
-                    message="ptp4l service not detected.",
-                    phase=Phase.VALIDATION,
-                    probe_type=ProbeType.LIVENESS,
-                    error_code="SYNC_PTP_SERVICE_MISSING",
-                )
-            )
-        return results
-
-    def readiness(self) -> List[DiagResult]:
-        results = []
-        ptp_cfg = self.config.get("time_sync", {}).get("ptp", {})
-        threshold_ns = self.config.get("thresholds", {}).get("ptp_offset_ns", 500)
-        expected_gm = ptp_cfg.get("expected_gm_identity", "")
-
-        cmd_result = run_command(
-            ["pmc", "-u", "-b", "0", "GET TIME_STATUS_NP"], timeout=6.0
-        )
-
-        if not cmd_result.success:
-            results.append(
-                DiagResult(
-                    module_name=self.name,
-                    item_name="PTP Offset",
-                    status=Status.WARN,
-                    severity=Severity.MAJOR,
-                    message=f"pmc not available or failed: {cmd_result.stderr}",
-                    phase=Phase.VALIDATION,
-                    probe_type=ProbeType.READINESS,
-                    error_code="SYNC_PTP_TOOL_MISSING",
-                )
-            )
-            return results
-
-        output = cmd_result.stdout
-        offset_match = re.search(r"offsetFromMaster\s+(-?\d+)", output)
-        gm_match = re.search(r"gmIdentity\s+([0-9a-fA-F:]+)", output)
-
-        if offset_match:
-            offset_ns = int(offset_match.group(1))
-            abs_offset = abs(offset_ns)
-            if abs_offset > threshold_ns * 5:
-                status, severity = Status.FAIL, Severity.CRITICAL
-                error_code = "SYNC_PTP_OFFSET_HIGH"
-            elif abs_offset > threshold_ns:
-                status, severity = Status.WARN, Severity.MAJOR
-                error_code = "SYNC_PTP_OFFSET_HIGH"
-            else:
-                status, severity = Status.PASS, Severity.INFO
-                error_code = ""
-
-            results.append(
-                DiagResult(
-                    module_name=self.name,
-                    item_name="PTP Offset",
-                    status=status,
-                    severity=severity,
-                    message=f"Offset {offset_ns} ns (threshold {threshold_ns} ns)",
-                    phase=Phase.VALIDATION,
-                    probe_type=ProbeType.READINESS,
-                    metrics={"offset_ns": offset_ns},
-                    error_code=error_code,
-                )
-            )
-        else:
-            results.append(
-                DiagResult(
-                    module_name=self.name,
-                    item_name="PTP Offset",
-                    status=Status.WARN,
-                    severity=Severity.MAJOR,
-                    message="Unable to parse offsetFromMaster from pmc output.",
-                    phase=Phase.VALIDATION,
-                    probe_type=ProbeType.READINESS,
-                    error_code="SYNC_PTP_OFFSET_UNKNOWN",
-                )
-            )
-
-        if expected_gm and gm_match:
-            gm_identity = gm_match.group(1)
-            if gm_identity.lower() != expected_gm.lower():
-                results.append(
-                    DiagResult(
-                        module_name=self.name,
-                        item_name="PTP Grandmaster",
-                        status=Status.WARN,
-                        severity=Severity.MAJOR,
-                        message=f"GM identity mismatch: {gm_identity} (expected {expected_gm})",
-                        phase=Phase.VALIDATION,
-                        probe_type=ProbeType.READINESS,
-                        error_code="SYNC_PTP_GM_MISMATCH",
-                    )
-                )
-            else:
-                results.append(
-                    DiagResult(
-                        module_name=self.name,
-                        item_name="PTP Grandmaster",
-                        status=Status.PASS,
-                        severity=Severity.INFO,
-                        message=f"GM identity OK: {gm_identity}",
-                        phase=Phase.VALIDATION,
-                        probe_type=ProbeType.READINESS,
-                    )
-                )
-
-        return results

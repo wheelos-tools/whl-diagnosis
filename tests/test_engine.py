@@ -17,9 +17,10 @@
 
 
 import unittest
+import time
 
-from src.core.engine import DiagnosticEngine
-from src.core.interface import IDiagnosticProbe, DiagResult, Status, Severity, Phase
+from src.execution.engine import DiagnosticEngine
+from src.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity, Phase
 
 
 class DummyProbe(IDiagnosticProbe):
@@ -86,13 +87,11 @@ class FailingProbe(IDiagnosticProbe):
 
 
 class DependentProbe(IDiagnosticProbe):
+    depends_on = ["Failing"]
+
     @property
     def name(self) -> str:
         return "Dependent"
-
-    @property
-    def dependencies(self):
-        return ["Failing"]
 
     def liveness(self):
         return [
@@ -138,6 +137,53 @@ class EnginePhaseTests(unittest.TestCase):
         dependent_results = [r for r in results if r.module_name == "Dependent"]
         self.assertTrue(dependent_results)
         self.assertTrue(all(r.status == Status.SKIP for r in dependent_results))
+        self.assertEqual(len(dependent_results), 1)
+
+    def test_parallel_execution_within_same_layer(self):
+        class SlowProbeA(IDiagnosticProbe):
+            @property
+            def name(self) -> str:
+                return "SlowA"
+
+            def liveness(self):
+                time.sleep(0.15)
+                return [
+                    DiagResult(
+                        module_name=self.name,
+                        item_name="liveness",
+                        status=Status.PASS,
+                        severity=Severity.INFO,
+                        message="ok",
+                    )
+                ]
+
+        class SlowProbeB(IDiagnosticProbe):
+            @property
+            def name(self) -> str:
+                return "SlowB"
+
+            def liveness(self):
+                time.sleep(0.15)
+                return [
+                    DiagResult(
+                        module_name=self.name,
+                        item_name="liveness",
+                        status=Status.PASS,
+                        severity=Severity.INFO,
+                        message="ok",
+                    )
+                ]
+
+        config = {"_diagnosis_mode": "default"}
+        engine = DiagnosticEngine(config)
+        engine.register(SlowProbeA)
+        engine.register(SlowProbeB)
+
+        start = time.monotonic()
+        engine.run()
+        elapsed = time.monotonic() - start
+
+        self.assertLess(elapsed, 0.28)
 
 
 if __name__ == "__main__":

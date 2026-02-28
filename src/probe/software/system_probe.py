@@ -36,7 +36,7 @@ import glob
 import logging
 from typing import List
 
-from src.core.interface import IDiagnosticProbe, DiagResult, Status, Severity
+from src.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity
 from src.utils.shell_runner import run_command, read_sysfs
 
 logger = logging.getLogger(__name__)

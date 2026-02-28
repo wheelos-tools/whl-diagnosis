@@ -20,8 +20,8 @@ import unittest
 from unittest.mock import patch
 
 from src.utils.shell_runner import CommandResult
-from src.core.interface import Status
-from src.modules.camera_probe import CameraProbe
+from src.execution.interface import Status
+from src.probe.sensors.camera_probe import CameraProbe
 
 
 class CameraProbeTests(unittest.TestCase):
@@ -43,8 +43,8 @@ class CameraProbeTests(unittest.TestCase):
             return CommandResult(1, "", "fail")
 
         with patch(
-            "src.modules.camera_probe.run_command", side_effect=fake_run_command
-        ), patch("src.modules.camera_probe.check_and_update", return_value="changed"):
+            "src.probe.sensors.camera_probe.run_command", side_effect=fake_run_command
+        ), patch("src.probe.sensors.camera_probe.check_and_update", return_value="changed"):
             results = probe.discovery()
 
         fingerprint = [r for r in results if "Fingerprint" in r.item_name][0]
@@ -68,7 +68,7 @@ class CameraProbeTests(unittest.TestCase):
         output = "Frames per second: 25.0\nWidth/Height : 1280 / 720\n"
 
         with patch(
-            "src.modules.camera_probe.run_command",
+            "src.probe.sensors.camera_probe.run_command",
             return_value=CommandResult(0, output, ""),
         ):
             results = probe.readiness()

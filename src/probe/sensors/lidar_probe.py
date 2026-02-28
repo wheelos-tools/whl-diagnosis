@@ -17,30 +17,27 @@
 
 
 """
-LiDAR 诊断模块
-通过 UDP 包速率和完整性来判断 LiDAR 健康状态
+LiDAR diagnostics module
+Evaluates LiDAR health using UDP packet rate and integrity
 """
 
 import socket
 import time
-from typing import List, Dict
+from typing import List
 
-from src.core.interface import IDiagnosticProbe, DiagResult, Status, Severity
+from src.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity
 
 
 class LiDARProbe(IDiagnosticProbe):
+    depends_on = ["Network Link Probe", "PTP Sync Probe"]
 
     @property
     def name(self) -> str:
         return "LiDAR Packet Probe"
 
     @property
-    def dependencies(self) -> List[str]:
-        return ["Network Link Probe"]  # 依赖网络链路正常
-
-    @property
     def timeout_seconds(self) -> float:
-        return 30.0  # LiDAR 需要采集多帧数据
+        return 30.0  # LiDAR requires multi-frame sampling
 
     def run_check(self) -> List[DiagResult]:
         results = []
@@ -51,13 +48,13 @@ class LiDARProbe(IDiagnosticProbe):
             port = lidar_cfg["port"]
             expected_pps = lidar_cfg.get(
                 "expected_packets_per_second", 754
-            )  # Velodyne VLP-16 典型值
+            )  # Typical value for Velodyne VLP-16
             sample_duration = lidar_cfg.get("sample_duration_s", 2.0)
 
             pkt_count, avg_size = self._sample_udp_packets(port, sample_duration)
             actual_pps = pkt_count / sample_duration if sample_duration > 0 else 0
 
-            tolerance = 0.15  # 15% 容忍度
+            tolerance = 0.15  # 15% tolerance
             if actual_pps >= expected_pps * (1 - tolerance):
                 results.append(
                     DiagResult(
@@ -95,13 +92,15 @@ class LiDARProbe(IDiagnosticProbe):
                         message=f"No UDP packets received on port {port}!",
                         metrics={"packets_per_second": 0},
                         error_code="SENSOR_LIDAR_NO_DATA",
+                        raw_output=f"Timeout waiting for UDP packets on port {port}",
+                        sys_logs=self.fetch_system_logs("eth1|network", 20),
                     )
                 )
 
         return results
 
     def _sample_udp_packets(self, port: int, duration: float) -> tuple:
-        """采样 UDP 包并统计数量和平均大小"""
+        """Sample UDP packets and compute count / average size."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.settimeout(1.0)

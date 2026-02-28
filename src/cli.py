@@ -15,138 +15,174 @@
 # Created Date: 2025-02-15
 # Author: daohu527
 
-"""
-AD Diagnostic System - CLI Entry Point
-用法:
-    ad-diag                    # 使用默认配置运行全量诊断
-    ad-diag --config custom.yaml
-    ad-diag --module ptp,camera   # 只运行指定模块
-    ad-diag --format json         # JSON 输出
-    ad-diag --output report.json  # 保存到文件
-    ad-diag --mode diagnostic     # 诊断模式（会做主动测试）
-"""
 import argparse
 import sys
 from pathlib import Path
-import os
 
-# 确保项目根目录在 path 中
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.config.loader import load_config
+from src.execution.workflow import run_diagnostics
+from src.output.reporter import ConsoleReporter, JsonReporter, HtmlReporter, LlmReporter, RawReporter
+from src.observability.logger import setup_logger
+from src.api.server import run_server
 
-from src.core.engine import DiagnosticEngine
-from src.core.reporter import ConsoleReporter, JsonReporter
-from src.core.config_loader import load_config
-from src.modules.network_probe import NetworkLinkProbe, PTPProbe
-from src.modules.camera_probe import CameraProbe
-from src.modules.gpu_probe import GPUProbe
-from src.modules.lidar_probe import LiDARProbe
-from src.modules.gnss_probe import GNSSProbe
-from src.modules.can_probe import CANProbe
-from src.modules.system_probe import SystemProbe
 
-# 模块注册表
-PROBE_REGISTRY = {
-    "system": SystemProbe,
-    "network": NetworkLinkProbe,
-    "ptp": PTPProbe,
-    "gnss": GNSSProbe,
-    "camera": CameraProbe,
-    "gpu": GPUProbe,
-    "lidar": LiDARProbe,
-    "can": CANProbe,
-}
+def discover_hardware(out_file):
+    """Auto-discovers hardware layout and generates a baseline vehicle_topology.yaml"""
+    print(f"🔍 Auto-discovering system hardware...", file=sys.stderr)
+    import subprocess
+    import yaml
 
+    # 1. Discover GPUs
+    gpus = 0
+    try:
+        lspci_out = subprocess.check_output("lspci | grep -i 'vga'", shell=True, text=True)
+        gpus = len([line for line in lspci_out.strip().split('\n') if 'NVIDIA' in line or 'Intel' in line or 'AMD' in line])
+    except:
+        pass
+
+    # 2. Discover Network Interfaces
+    nics = []
+    try:
+        ip_out = subprocess.check_output("ip -br link", shell=True, text=True)
+        import json
+        links = json.loads(ip_out)
+        for link in links:
+            if link['ifname'] != 'lo' and not link['ifname'].startswith('docker') and not link['ifname'].startswith('veth'):
+                nics.append({"name": link['ifname'], "role": "data", "expected_speed": 1000, "expected_mtu": link.get('mtu', 1500)})
+    except:
+        nics = [{"name": "eth0", "role": "ptp_sync", "expected_speed": 1000, "expected_mtu": 1500}]
+
+    # 3. Formulate Baseline YAML
+    baseline = {
+        "vehicle_type": "AutoDiscovered_Platform",
+        "diagnosis_mode": "default",
+        "thresholds": {"ptp_offset_ns": 500, "gpu_temp_c": 85, "cpu_temp_c": 90, "min_disk_free_gb": 50},
+        "infrastructure": {
+            "expected_gpu_count": gpus or 1,
+            "expected_cpu_cores": 8,
+            "storage": {"data_path": "/data", "min_free_gb": 50}
+        },
+        "time_sync": {
+            "ptp": {"interface": nics[0]["name"] if nics else "eth0", "domain": 0}
+        },
+        "sensors": {
+            "cameras": [],
+            "lidars": [],
+            "can": {"interfaces": []}
+        },
+        "network": {
+            "interfaces": nics
+        }
+    }
+
+    yaml_str = yaml.dump(baseline, sort_keys=False, default_flow_style=False)
+
+    if out_file:
+        with open(out_file, 'w') as f:
+            f.write(yaml_str)
+        print(f"✅ Baseline vehicle topology saved to {out_file}", file=sys.stderr)
+    else:
+        print(yaml_str)
 
 def main():
     parser = argparse.ArgumentParser(
-        description="🚗 Autonomous Driving Full-Stack Diagnostic System"
+        description="WheelOS Autonomous Driving Hardware Diagnostics"
     )
-    parser.add_argument(
-        "--config",
-        "-c",
-        default="config/vehicle_topology.yaml",
-        help="Path to vehicle topology config file",
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Run command
+    run_parser = subparsers.add_parser("run", help="Run diagnostics")
+    run_parser.add_argument("-c", "--config", required=True, help="Path to diagnostic config YAML")
+    run_parser.add_argument(
+        "-m", "--mode", choices=["default", "startup", "stress"], default="default", help="Diagnosis mode"
     )
-    parser.add_argument(
-        "--module",
-        "-m",
-        default=None,
-        help="Comma-separated module names to run (default: all)",
+    run_parser.add_argument(
+        "-o", "--output", choices=["console", "json", "html", "llm", "raw"], default="raw", help="Output format (llm = Markdown for AI context)"
     )
-    parser.add_argument(
-        "--format",
-        "-f",
-        choices=["console", "json"],
-        default="console",
-        help="Output format",
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        default=None,
-        help="Save report to file",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["default", "diagnostic", "stress"],
-        default="default",
-        help="Diagnosis mode",
-    )
+    run_parser.add_argument("--out-file", help="Path to save output file")
+    run_parser.add_argument("--analyze", action="store_true", help="Use LLM to analyze the generated report and provide context-aware solutions (requires LLM_API_KEY).")
+    run_parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
+
+    # Serve command
+    serve_parser = subparsers.add_parser("serve", help="Start the web diagnostic API server")
+    serve_parser.add_argument("-c", "--config", help="Path to diagnostic config YAML to default to in the UI")
+    serve_parser.add_argument("--port", type=int, default=7777, help="Port to run server on (default: 7777)")
+    serve_parser.add_argument("--host", default="0.0.0.0", help="Host interface to bind")
+
+    # Discover command
+    discover_parser = subparsers.add_parser("discover", help="Auto-discover hardware and generate topology config")
+    discover_parser.add_argument("--out-file", help="Path to save generated basic vehicle_topology.yaml")
 
     args = parser.parse_args()
 
-    # 加载配置
-    config_path = Path(args.config)
-    if not config_path.exists():
-        print(f"❌ Config file not found: {config_path}")
-        sys.exit(1)
+    if args.command == "discover":
+        discover_hardware(args.out_file)
+        return
 
-    config_model = load_config(config_path)
-    config = config_model.model_dump()
-    config["_diagnosis_mode"] = args.mode
-    config["diagnosis_mode"] = args.mode
+    if args.command == "serve":
+        import os
+        if getattr(args, "config", None):
+            os.environ["AD_DIAG_CONFIG"] = args.config
+        print(f"🚀 Starting AD Diagnostic Web Server on http://{args.host}:{args.port}")
+        run_server(host=args.host, port=args.port)
+        return
 
-    # 初始化引擎
-    engine = DiagnosticEngine(config)
+    import os
+    if args.verbose:
+        os.environ["AD_DIAG_LOG_LEVEL"] = "DEBUG"
+    setup_logger()
 
-    # 注册模块
-    if args.module:
-        selected = [m.strip() for m in args.module.split(",")]
-    else:
-        selected = list(PROBE_REGISTRY.keys())
+    try:
+        config = load_config(args.config).model_dump()
+        config["_diagnosis_mode"] = args.mode
 
-    for mod_name in selected:
-        if mod_name in PROBE_REGISTRY:
-            engine.register(PROBE_REGISTRY[mod_name])
+        print("🚀 Starting AD diagnostics...\n", file=sys.stderr)
+
+        results, metadata_wf, _ = run_diagnostics(Path(args.config), args.mode)
+
+        # Meta info
+        metadata = {
+            "vehicle_id": config.get("vehicle_id", "UNKNOWN"),
+            "vehicle_type": config.get("vehicle_type", "UNKNOWN"),
+            "diagnosis_mode": args.mode,
+        }
+
+        # Generate report
+        if args.output == "json":
+            reporter = JsonReporter()
+        elif args.output == "html":
+            reporter = HtmlReporter()
+        elif args.output == "llm":
+            reporter = LlmReporter()
+        elif args.output == "raw":
+            reporter = RawReporter()
         else:
-            print(f"⚠️ Unknown module: {mod_name}, skipping")
+            reporter = ConsoleReporter()
 
-    # 执行诊断
-    results = engine.run()
+        report_txt = reporter.generate(results, metadata)
 
-    # 生成报告
-    metadata = {
-        "vehicle_id": config.get("vehicle_id", "unknown"),
-        "vehicle_type": config.get("vehicle_type", "unknown"),
-        "diagnosis_mode": args.mode,
-        "config_version": config.get("config_version", ""),
-        "software_version": os.environ.get("AD_DIAG_SW_VERSION", ""),
-    }
+        # AI Analysis
+        if getattr(args, 'analyze', False):
+            print("\n🧠 Submitting report for LLM Analysis...", file=sys.stderr)
+            from src.llm.analyzer import LLMAnalyzer
+            analyzer = LLMAnalyzer()
+            analysis_result = analyzer.analyze_report(report_txt)
+            if analysis_result:
+                print("✅ Analysis Data Recieved", file=sys.stderr)
+                report_txt += "\n\n" + "# 🧠 AI Expert Analysis & Remediation\n\n" + analysis_result
 
-    if args.format == "json":
-        reporter = JsonReporter()
-    else:
-        reporter = ConsoleReporter()
+        if args.out_file:
+            with open(args.out_file, 'w') as f:
+                f.write(report_txt)
+            print(f"\nReport saved to: {args.out_file}", file=sys.stderr)
+        else:
+            print(report_txt)
 
-    report = reporter.generate(results, metadata)
-
-    if args.output:
-        Path(args.output).write_text(report)
-        print(f"📄 Report saved to {args.output}")
-    else:
-        if args.format == "json":
-            print(report)
-
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"❌ Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

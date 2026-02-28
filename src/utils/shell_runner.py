@@ -42,12 +42,12 @@ def run_command(
     env: Optional[dict] = None,
 ) -> CommandResult:
     """
-    安全执行外部命令。
+    Execute external commands safely.
 
-    关键安全原则：
-    1. 使用列表参数，绝不用 shell=True
-    2. 强制超时，防止阻塞
-    3. 日志记录每一次外部调用
+    Key security principles:
+    1. Use list arguments, never `shell=True`
+    2. Enforce timeouts to avoid blocking
+    3. Log every external invocation
     """
     logger.debug(f"Running command: {' '.join(args)}")
     try:
@@ -56,7 +56,7 @@ def run_command(
             capture_output=True,
             text=True,
             timeout=timeout,
-            shell=False,  # 显式禁止 shell 注入
+            shell=False,  # Explicitly disable shell injection vectors
             env=env,
         )
         if check and proc.returncode != 0:
@@ -72,8 +72,8 @@ def run_command(
 
 def read_sysfs(path: str) -> Optional[str]:
     """
-    安全读取 sysfs/procfs 文件。
-    比 subprocess 调用 cat 更高效更安全。
+    Read sysfs/procfs files safely.
+    More efficient and safer than calling `cat` via subprocess.
     """
     try:
         with open(path, "r") as f:

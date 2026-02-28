@@ -12,19 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Created Date: 2025-02-15
+# Created Date: 2025-02-28
 # Author: daohu527
 
-
 """
-GPU 健康度诊断模块
-支持 NVIDIA GPU (通过 nvidia-smi) 和未来的其他加速器
+GPU health diagnostics module
+Supports NVIDIA GPUs (via `nvidia-smi`) and future accelerators
+
+Features:
+    - GPU detection and liveness
+    - Temperature and thermal throttling detection
+    - ECC memory error detection
+    - Power draw and power limit checks
+    - PCIe bandwidth checks
 """
 
-import json
-from typing import List, Dict
+from typing import List
 
-from src.core.interface import IDiagnosticProbe, DiagResult, Status, Severity
+from src.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity, Phase, ProbeType
 from src.utils.shell_runner import run_command
 
 
@@ -41,12 +46,15 @@ class GPUProbe(IDiagnosticProbe):
     def run_check(self) -> List[DiagResult]:
         results = []
 
-        # 使用 nvidia-smi 查询 JSON 格式数据
+        # Query GPU telemetry through nvidia-smi
+        # Added power.draw, power.limit, pcie.link.gen.current, pcie.link.gen.max
         cmd_result = run_command(
             [
                 "nvidia-smi",
                 "--query-gpu=index,name,temperature.gpu,utilization.gpu,"
-                "utilization.memory,memory.total,memory.used,clocks_throttle_reasons.active,ecc.errors.corrected.aggregate.total",
+                "utilization.memory,memory.total,memory.used,clocks_throttle_reasons.active,"
+                "ecc.errors.corrected.aggregate.total,power.draw,power.limit,"
+                "pcie.link.gen.current,pcie.link.gen.max",
                 "--format=csv,noheader,nounits",
             ]
         )
@@ -59,25 +67,26 @@ class GPUProbe(IDiagnosticProbe):
                     status=Status.FAIL,
                     severity=Severity.CRITICAL,
                     message=f"nvidia-smi failed: {cmd_result.stderr}",
+                    phase=Phase.DISCOVERY,
+                    probe_type=ProbeType.LIVENESS,
                     error_code="INFRA_GPU_NOT_FOUND",
+                    raw_output=cmd_result.stderr,
+                    sys_logs=self.fetch_system_logs("nvidia", 30),
                 )
             )
             return results
 
         for line in cmd_result.stdout.strip().split("\n"):
             parts = [p.strip() for p in line.split(",")]
-            if len(parts) < 8:
+            if len(parts) < 13:
                 continue
 
-            idx, gpu_name, temp, gpu_util, mem_util, mem_total, mem_used, throttle = (
-                parts[:8]
-            )
-            ecc_errors = parts[8] if len(parts) > 8 else "0"
+            idx, gpu_name, temp, gpu_util, mem_util, mem_total, mem_used, throttle, ecc_errors, power_draw, power_limit, pcie_gen_cur, pcie_gen_max = parts
 
-            temp = int(temp)
+            temp = int(temp) if temp.isdigit() else 0
             temp_threshold = self.config.get("gpu_temp_threshold", 85)
 
-            # 温度检查
+            # 1. Temperature check
             if temp >= temp_threshold:
                 results.append(
                     DiagResult(
@@ -87,7 +96,9 @@ class GPUProbe(IDiagnosticProbe):
                         severity=Severity.CRITICAL if temp > 95 else Severity.MAJOR,
                         message=f"{gpu_name}: {temp}°C (threshold: {temp_threshold}°C)",
                         metrics={"gpu_index": idx, "temperature_c": temp},
-                        error_code="INFRA_GPU_THROTTLE",
+                        error_code="INFRA_GPU_OVERHEAT",
+                        raw_output=f"Temperature: {temp}°C (Throttling possible)",
+                        sys_logs=self.fetch_system_logs("nvidia", 15),
                     )
                 )
             else:
@@ -102,7 +113,7 @@ class GPUProbe(IDiagnosticProbe):
                     )
                 )
 
-            # ECC 错误检查
+            # 2. ECC error check
             ecc_count = int(ecc_errors) if ecc_errors.isdigit() else 0
             if ecc_count > 0:
                 results.append(
@@ -111,13 +122,13 @@ class GPUProbe(IDiagnosticProbe):
                         item_name=f"GPU[{idx}] ECC Errors",
                         status=Status.WARN,
                         severity=Severity.MAJOR,
-                        message=f"ECC corrected errors: {ecc_count}. 硬件可能正在老化。",
+                        message=f"ECC corrected errors: {ecc_count}. Hardware aging may be occurring.",
                         metrics={"ecc_errors": ecc_count},
                         error_code="INFRA_GPU_ECC",
                     )
                 )
 
-            # 降频检查
+            # 3. Throttling check
             if throttle and throttle.lower() not in (
                 "0x0000000000000000",
                 "[not supported]",
@@ -134,5 +145,40 @@ class GPUProbe(IDiagnosticProbe):
                         error_code="INFRA_GPU_THROTTLE",
                     )
                 )
+
+            # 4. Power check (if supported)
+            if power_draw != "[Not Supported]" and power_limit != "[Not Supported]":
+                try:
+                    p_draw = float(power_draw)
+                    p_limit = float(power_limit)
+                    if p_draw > p_limit * 0.95:
+                        results.append(
+                            DiagResult(
+                                module_name=self.name,
+                                item_name=f"GPU[{idx}] Power",
+                                status=Status.WARN,
+                                severity=Severity.MINOR,
+                                message=f"GPU power draw ({p_draw}W) is near limit ({p_limit}W)",
+                                metrics={"power_draw_w": p_draw, "power_limit_w": p_limit},
+                                error_code="INFRA_GPU_POWER_LIMIT",
+                            )
+                        )
+                except ValueError:
+                    pass
+
+            # 5. PCIe Bandwidth check
+            if pcie_gen_cur != "[Not Supported]" and pcie_gen_max != "[Not Supported]":
+                if pcie_gen_cur != pcie_gen_max:
+                    results.append(
+                        DiagResult(
+                            module_name=self.name,
+                            item_name=f"GPU[{idx}] PCIe Link",
+                            status=Status.WARN,
+                            severity=Severity.MAJOR,
+                            message=f"PCIe link downgraded: Gen {pcie_gen_cur} (Max: Gen {pcie_gen_max})",
+                            metrics={"pcie_gen_current": pcie_gen_cur, "pcie_gen_max": pcie_gen_max},
+                            error_code="INFRA_GPU_PCIE_DOWNGRADE",
+                        )
+                    )
 
         return results

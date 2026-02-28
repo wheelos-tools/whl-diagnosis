@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whl-diag"
+version = "0.1.0"
+description = "Autonomous driving hardware and middleware diagnostics"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [
+	{ name = "WheelOS Team" }
+]
+dependencies = [
+	"pydantic>=2.6,<3.0",
+	"PyYAML>=6.0",
+	"rich>=13.7",
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+
+[project.urls]
+Homepage = "https://github.com/wheelos-tools/whl-diagnosis"
+Documentation = "https://github.com/wheelos-tools/whl-diagnosis"
+Source = "https://github.com/wheelos-tools/whl-diagnosis"
+Issues = "https://github.com/wheelos-tools/whl-diagnosis/issues"
+
+[project.optional-dependencies]
+dev = [
+	"pytest>=8.0",
+	"pytest-cov>=5.0",
+]
+gnss = [
+	"pyserial>=3.5",
+]
+
+[project.scripts]
+whl-diag = "src.cli:main"
+
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]
+namespaces = false
+

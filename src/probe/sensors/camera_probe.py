@@ -17,18 +17,18 @@
 
 
 """
-Camera 诊断模块
+Camera diagnostics module
 
-功能:
-  - Discovery: 设备存在性与指纹记录
-  - Readiness: 分辨率与帧率配置检查 (非侵入)
+Features:
+    - Discovery: device presence and fingerprint tracking
+    - Readiness: non-intrusive resolution and frame-rate checks
 """
 
 import logging
 import re
 from typing import List, Dict
 
-from src.core.interface import (
+from src.execution.interface import (
     IDiagnosticProbe,
     DiagResult,
     Status,
@@ -36,7 +36,7 @@ from src.core.interface import (
     Phase,
     ProbeType,
 )
-from src.core.fingerprint import check_and_update
+from src.state.fingerprint import check_and_update
 from src.utils.shell_runner import run_command
 
 logger = logging.getLogger(__name__)
@@ -86,6 +86,8 @@ class CameraProbe(IDiagnosticProbe):
                         phase=Phase.DISCOVERY,
                         probe_type=ProbeType.LIVENESS,
                         error_code="SENSOR_CAM_DEVICE_MISSING",
+                        raw_output=cmd_result.stderr,
+                        sys_logs=self.fetch_system_logs("uvcvideo", 20),
                     )
                 )
                 continue
@@ -103,7 +105,7 @@ class CameraProbe(IDiagnosticProbe):
                 )
             )
 
-            # 尝试读取 udev 序列号并做硬件指纹变更检测
+            # Try reading udev serial and detect fingerprint changes
             serial = ""
             udev_result = run_command(
                 ["udevadm", "info", "--query=property", "--name", dev],
@@ -186,6 +188,8 @@ class CameraProbe(IDiagnosticProbe):
                         phase=Phase.VALIDATION,
                         probe_type=ProbeType.READINESS,
                         error_code="SENSOR_CAM_V4L2_UNAVAILABLE",
+                        raw_output=cmd_result.stderr,
+                        sys_logs=self.fetch_system_logs("uvcvideo", 20),
                     )
                 )
                 continue

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>AD Diagnosis Dashboard</title>
+		<style>
+			body { font-family: Arial, sans-serif; margin: 24px; background: #f7f8fa; color: #1f2937; }
+			.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+			.controls { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+			input[type="text"] { width: 360px; max-width: 70vw; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; }
+			button { padding: 8px 14px; border: 0; border-radius: 8px; background: #2563eb; color: white; cursor: pointer; }
+			button:disabled { background: #93c5fd; cursor: not-allowed; }
+			.status { font-weight: 600; }
+			.status-running { color: #b45309; }
+			.status-success { color: #047857; }
+			.status-failed { color: #b91c1c; }
+			.card { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+			.kpi { display: grid; grid-template-columns: repeat(5, minmax(100px, 1fr)); gap: 10px; }
+			.kpi div { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; text-align: center; }
+			table { width: 100%; border-collapse: collapse; background: white; border-radius: 12px; overflow: hidden; }
+			th, td { border-bottom: 1px solid #e5e7eb; padding: 10px; text-align: left; font-size: 14px; }
+			thead { background: #111827; color: white; }
+			.PASS { color: #047857; font-weight: 600; }
+			.WARN { color: #b45309; font-weight: 600; }
+			.FAIL, .ERROR { color: #b91c1c; font-weight: 600; }
+			.SKIP { color: #6b7280; font-weight: 600; }
+			.muted { color: #6b7280; }
+		</style>
+	</head>
+	<body>
+		<div class="header">
+			<h1>AD Diagnosis Dashboard</h1>
+			<div id="updatedAt" class="muted">Not run yet</div>
+		</div>
+
+		<div class="controls card">
+			<label for="configPath">Config Path:</label>
+			<input id="configPath" type="text" value="__DEFAULT_CONFIG__" style="margin-right:6px;" placeholder="config/my_vehicle.yaml" />
+			<input id="fileInput" type="file" accept=".yaml,.yml" style="display:inline-block; width:auto;" />
+			<button id="runBtn" type="button">Run Diagnosis / Refresh</button>
+			<span id="runStatus" class="status muted">Idle</span>
+		</div>
+
+		<div class="card kpi" id="summary">
+			<div><div>Total</div><strong id="sumTotal">-</strong></div>
+			<div><div>PASS</div><strong id="sumPass">-</strong></div>
+			<div><div>WARN</div><strong id="sumWarn">-</strong></div>
+			<div><div>FAIL</div><strong id="sumFail">-</strong></div>
+			<div><div>SKIP</div><strong id="sumSkip">-</strong></div>
+		</div>
+
+		<div class="card" style="overflow:auto;">
+			<table>
+				<thead>
+					<tr>
+						<th>Module</th>
+						<th>Check Item</th>
+						<th>Status</th>
+						<th>Message</th>
+						<th>Error Code</th>
+						<th>Remediation</th>
+					</tr>
+				</thead>
+				<tbody id="resultBody">
+					<tr><td colspan="6" class="muted">No diagnostic data yet.</td></tr>
+				</tbody>
+			</table>
+		</div>
+
+		<script>
+			const runBtn = document.getElementById("runBtn");
+			const runStatus = document.getElementById("runStatus");
+			const updatedAt = document.getElementById("updatedAt");
+			const configPath = document.getElementById("configPath");
+			const resultBody = document.getElementById("resultBody");
+
+			function setStatus(text, cls) {
+				runStatus.textContent = text;
+				runStatus.className = `status ${cls}`;
+			}
+
+			function esc(value) {
+				return String(value ?? "").replace(/[&<>"']/g, function(ch) {
+					return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[ch];
+				});
+			}
+
+			function renderSummary(summary) {
+				document.getElementById("sumTotal").textContent = summary.total ?? 0;
+				document.getElementById("sumPass").textContent = summary.pass ?? 0;
+				document.getElementById("sumWarn").textContent = summary.warn ?? 0;
+				document.getElementById("sumFail").textContent = (summary.fail ?? 0) + (summary.error ?? 0);
+				document.getElementById("sumSkip").textContent = summary.skip ?? 0;
+			}
+
+			function renderResults(results) {
+				if (!results || results.length === 0) {
+					resultBody.innerHTML = '<tr><td colspan="6" class="muted">No diagnostic results.</td></tr>';
+					return;
+				}
+
+				resultBody.innerHTML = results.map(r => `
+					<tr>
+						<td>${esc(r.module)}</td>
+						<td>${esc(r.item)}</td>
+						<td class="${esc(r.status)}">${esc(r.status)}</td>
+						<td>${esc(r.message)}</td>
+						<td>${esc(r.error_code || "-")}</td>
+						<td>${esc(r.remediation || "-")}</td>
+					</tr>
+				`).join("");
+			}
+
+
+			// File input: read YAML and update configPath/content
+			let uploadedConfigContent = null;
+			document.getElementById('fileInput').addEventListener('change', function(e) {
+				const file = e.target.files[0];
+				if (!file) return;
+				const ext = file.name.split('.').pop().toLowerCase();
+				if (ext !== 'yaml' && ext !== 'yml') {
+					setStatus('Only .yaml/.yml files are allowed.', 'status-failed');
+					uploadedConfigContent = null;
+					return;
+				}
+				setStatus('YAML file loaded: ' + file.name, 'status-success');
+				document.getElementById('configPath').value = file.name;
+				const reader = new FileReader();
+				reader.onload = function(evt) {
+					uploadedConfigContent = evt.target.result;
+				};
+				reader.readAsText(file);
+			});
+
+
+			async function runDiagnosis() {
+				const startedAt = Date.now();
+				runBtn.disabled = true;
+				setStatus("Running...", "status-running");
+
+				try {
+					let body = { config: configPath.value.trim() || "config/vehicle_topology.yaml" };
+					if (uploadedConfigContent) {
+						body['config_content'] = uploadedConfigContent;
+					}
+					const resp = await fetch("/run", {
+						method: "POST",
+						headers: {"Content-Type": "application/json"},
+						body: JSON.stringify(body)
+					});
+
+					const payload = await resp.json();
+					if (!resp.ok) {
+						throw new Error(payload.error || `HTTP ${resp.status}`);
+					}
+
+					renderSummary(payload.summary || {});
+					renderResults(payload.results || []);
+
+					const duration = ((Date.now() - startedAt) / 1000).toFixed(2);
+					setStatus(`Success (${duration}s)`, "status-success");
+					updatedAt.textContent = `Updated: ${new Date().toLocaleString()}`;
+				} catch (err) {
+					setStatus(`Failed: ${err.message}`, "status-failed");
+				} finally {
+					runBtn.disabled = false;
+				}
+			}
+
+			runBtn.addEventListener("click", runDiagnosis);
+			runDiagnosis();
+		</script>
+	</body>
+</html>
+

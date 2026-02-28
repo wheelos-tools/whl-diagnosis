@@ -17,12 +17,12 @@
 
 
 """
-GNSS / PPS / NMEA 诊断模块
+GNSS / PPS / NMEA diagnostics module
 
-功能:
-  - PPS 设备存在性与脉冲稳定性
-  - NMEA 串口数据有效性
-  - GNSS 定位状态 (Fix Type)
+Features:
+    - PPS device presence and pulse stability
+    - NMEA serial data validity
+    - GNSS fix status (fix type)
 """
 
 import os
@@ -31,8 +31,8 @@ import time
 import logging
 from typing import List
 
-from src.core.interface import IDiagnosticProbe, DiagResult, Status, Severity
-from src.utils.shell_runner import run_command, read_sysfs
+from src.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity
+from src.utils.shell_runner import run_command
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +55,10 @@ class GNSSProbe(IDiagnosticProbe):
         nmea_device = gnss_cfg.get("nmea_device", "/dev/ttyUSB0")
         nmea_baud = gnss_cfg.get("nmea_baud", 115200)
 
-        # ── 1. PPS 设备检测 ──
+        # ── 1. PPS device check ──
         results.extend(self._check_pps(pps_device))
 
-        # ── 2. NMEA 串口检测 ──
+        # ── 2. NMEA serial check ──
         results.extend(self._check_nmea(nmea_device, nmea_baud))
 
         return results
@@ -79,7 +79,7 @@ class GNSSProbe(IDiagnosticProbe):
             )
             return results
 
-        # 使用 ppstest 工具采样 PPS 脉冲 (仅采 3 个)
+        # Sample PPS pulses via ppstest (collect a few pulses only)
         cmd_result = run_command(
             ["timeout", "5", "ppstest", "-a", pps_device],
             timeout=8.0,
@@ -98,7 +98,7 @@ class GNSSProbe(IDiagnosticProbe):
             )
             return results
 
-        # 解析 ppstest 输出，提取 assert/clear 时间戳
+        # Parse ppstest output and extract pulse timestamps
         timestamps = []
         for match in re.finditer(
             r"assert\s+(\d+)\.(\d+),\s+sequence:\s+(\d+)", cmd_result.stdout
@@ -111,7 +111,7 @@ class GNSSProbe(IDiagnosticProbe):
             timestamps.append(sec + nsec * 1e-9)
 
         if len(timestamps) >= 2:
-            # 检查 PPS 间隔是否稳定 (应该接近 1.0s)
+            # Check PPS interval stability (should be near 1.0s)
             intervals = [
                 timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1)
             ]
@@ -152,7 +152,7 @@ class GNSSProbe(IDiagnosticProbe):
                     item_name="PPS Signal",
                     status=Status.FAIL,
                     severity=Severity.CRITICAL,
-                    message="No PPS pulses received. 检查 GNSS 天线是否有天空视野。",
+                    message="No PPS pulses received. Check GNSS antenna sky visibility.",
                     error_code="SYNC_PPS_NO_SIGNAL",
                 )
             )
@@ -185,7 +185,7 @@ class GNSSProbe(IDiagnosticProbe):
             )
         )
 
-        # 读取 NMEA 数据并解析 GGA 语句
+        # Read NMEA stream and parse GGA sentences
         try:
             import serial
 
@@ -198,7 +198,7 @@ class GNSSProbe(IDiagnosticProbe):
                     lines.append(line)
             ser.close()
 
-            # 查找 GGA 语句
+            # Find first GGA sentence
             gga_line = None
             for line in lines:
                 if "$GPGGA" in line or "$GNGGA" in line:
