@@ -19,9 +19,9 @@
 import unittest
 from unittest.mock import patch
 
-from src.utils.shell_runner import CommandResult
-from src.execution.interface import Status
-from src.probe.sensors.camera_probe import CameraProbe
+from whl_diag.utils.shell_runner import CommandResult
+from whl_diag.execution.interface import Status
+from whl_diag.probe.sensors.camera_probe import CameraProbe
 
 
 class CameraProbeTests(unittest.TestCase):

@@ -29,8 +29,8 @@ Features:
 
 from typing import List
 
-from src.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity, Phase, ProbeType
-from src.utils.shell_runner import run_command
+from whl_diag.execution.interface import IDiagnosticProbe, DiagResult, Status, Severity, Phase, ProbeType
+from whl_diag.utils.shell_runner import run_command
 
 
 class GPUProbe(IDiagnosticProbe):

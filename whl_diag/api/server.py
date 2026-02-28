@@ -20,9 +20,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import os
 
-from src.execution.probe_catalog import PROBE_CATALOG
-from src.execution.workflow import run_diagnostics
-from src.output.reporter import JsonReporter
+from whl_diag.execution.probe_catalog import PROBE_CATALOG
+from whl_diag.execution.workflow import run_diagnostics
+from whl_diag.output.reporter import JsonReporter
 
 
 class DiagnosticHandler(BaseHTTPRequestHandler):
@@ -31,15 +31,15 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         import sys
         candidates = [
             Path(__file__).parent / "templates" / "dashboard.html",
-            Path.cwd() / "src" / "api" / "templates" / "dashboard.html",
+            Path.cwd() / "whl_diag" / "api" / "templates" / "dashboard.html",
             Path.cwd() / "api" / "templates" / "dashboard.html",
             Path.cwd() / "templates" / "dashboard.html",
         ]
         # Also try sys.path entries
         for p in sys.path:
             p = Path(p)
-            if (p / "src/api/templates/dashboard.html").exists():
-                candidates.append(p / "src/api/templates/dashboard.html")
+            if (p / "whl_diag/api/templates/dashboard.html").exists():
+                candidates.append(p / "whl_diag/api/templates/dashboard.html")
             if (p / "api/templates/dashboard.html").exists():
                 candidates.append(p / "api/templates/dashboard.html")
             if (p / "templates/dashboard.html").exists():
@@ -84,7 +84,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                      return
 
                 results, metadata, _ = run_diagnostics(config_path=config_path)
-                from src.output.reporter import HtmlReporter
+                from whl_diag.output.reporter import HtmlReporter
                 html = HtmlReporter().generate(results, metadata)
 
                 raw = html.encode("utf-8")

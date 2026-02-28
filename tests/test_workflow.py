@@ -1,10 +1,10 @@
 import unittest
 from unittest.mock import patch
 
-from src.execution.interface import DiagResult, Status, Severity
+from whl_diag.execution.interface import DiagResult, Status, Severity
 
 try:
-    from src.execution.workflow import resolve_probe_classes, run_diagnostics
+    from whl_diag.execution.workflow import resolve_probe_classes, run_diagnostics
     WORKFLOW_IMPORT_ERROR = None
 except ModuleNotFoundError as exc:
     resolve_probe_classes = None

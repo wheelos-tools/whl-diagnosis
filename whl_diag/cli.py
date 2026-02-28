@@ -19,11 +19,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from src.config.loader import load_config
-from src.execution.workflow import run_diagnostics
-from src.output.reporter import ConsoleReporter, JsonReporter, HtmlReporter, LlmReporter, RawReporter
-from src.observability.logger import setup_logger
-from src.api.server import run_server
+from whl_diag.config.loader import load_config
+from whl_diag.execution.workflow import run_diagnostics
+from whl_diag.output.reporter import ConsoleReporter, JsonReporter, HtmlReporter, LlmReporter, RawReporter
+from whl_diag.observability.logger import setup_logger
+from whl_diag.api.server import run_server
 
 
 def discover_hardware(out_file):
@@ -164,7 +164,7 @@ def main():
         # AI Analysis
         if getattr(args, 'analyze', False):
             print("\n🧠 Submitting report for LLM Analysis...", file=sys.stderr)
-            from src.llm.analyzer import LLMAnalyzer
+            from whl_diag.llm.analyzer import LLMAnalyzer
             analyzer = LLMAnalyzer()
             analysis_result = analyzer.analyze_report(report_txt)
             if analysis_result:

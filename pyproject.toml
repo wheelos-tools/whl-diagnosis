@@ -7,7 +7,7 @@ name = "whl-diag"
 version = "0.1.0"
 description = "Autonomous driving hardware and middleware diagnostics"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 license = { text = "Apache-2.0" }
 authors = [
 	{ name = "WheelOS Team" }
@@ -43,11 +43,10 @@ gnss = [
 ]
 
 [project.scripts]
-whl-diag = "src.cli:main"
+whl-diag = "whl_diag.cli:main"
 
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["whl_diag"]
 include = ["*"]
 namespaces = false
-

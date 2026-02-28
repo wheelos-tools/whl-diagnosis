@@ -19,8 +19,8 @@
 import unittest
 from unittest.mock import patch
 
-from src.execution.interface import Status
-from src.probe.network.network_probe import NetworkLinkProbe
+from whl_diag.execution.interface import Status
+from whl_diag.probe.network.network_probe import NetworkLinkProbe
 
 
 class NetworkProbeTests(unittest.TestCase):
